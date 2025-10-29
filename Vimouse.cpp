@@ -44,7 +44,7 @@ bool g_lPressed = false;
 bool g_uPressed = false;
 bool g_oPressed = false;
 bool g_nPressed = false;
-bool g_cmPressed = false;
+bool g_dotPressed = false;  // 修改：改为dotPressed表示句号键
 std::thread* g_moveThread = nullptr;
 bool g_shouldMove = false;
 
@@ -122,7 +122,7 @@ void SmoothMoveThread() {
         bool moved = false;
 
         // 检查是否需要加速
-        if (g_hPressed || g_jPressed || g_kPressed || g_lPressed || g_uPressed || g_oPressed || g_nPressed || g_cmPressed) {
+        if (g_hPressed || g_jPressed || g_kPressed || g_lPressed || g_uPressed || g_oPressed || g_nPressed || g_dotPressed) {
             // 动态加速：每0.01秒增加速度
             static DWORD lastMoveTime = GetTickCount();
             static DWORD accelerationStartTime = GetTickCount();
@@ -154,23 +154,24 @@ void SmoothMoveThread() {
         }
         // 添加对角方向移动
         if (g_uPressed) {
-            newX -= g_mouseSpeed / 10;  // 左
-            newY -= g_mouseSpeed / 10;  // 上
+            newX -= g_mouseSpeed / 7;  // 左
+            newY -= g_mouseSpeed / 7;  // 上
+
             moved = true;
         }
         if (g_oPressed) {
-            newX += g_mouseSpeed / 10;  // 右
-            newY -= g_mouseSpeed / 10;  // 上
+            newX += g_mouseSpeed / 7;  // 右
+            newY -= g_mouseSpeed / 7;  // 上
             moved = true;
         }
         if (g_nPressed) {
-            newX -= g_mouseSpeed / 10;  // 左
-            newY += g_mouseSpeed / 10;  // 下
+            newX -= g_mouseSpeed / 7;  // 左
+            newY += g_mouseSpeed / 7;  // 下
             moved = true;
         }
-        if (g_cmPressed) {
-            newX += g_mouseSpeed / 10;  // 右
-            newY += g_mouseSpeed / 10;  // 下
+        if (g_dotPressed) {  // 修改：使用g_dotPressed表示句号键
+            newX += g_mouseSpeed / 7;  // 右
+            newY += g_mouseSpeed / 7;  // 下
             moved = true;
         }
 
@@ -1420,12 +1421,12 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 更新指示器位置
                     UpdateIndicatorPosition();
                     break;
-                case VK_OEM_COMMA:  // 右下移动 (逗号键)
+                case VK_OEM_PERIOD:  // 右下移动 (句号键)
                     if (g_ctrlPressed) {
-                        // Ctrl+逗号传递给其他程序
+                        // Ctrl+句号传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
-                    g_cmPressed = true;  // 逗号键状态
+                    g_dotPressed = true;  // 修改：使用g_dotPressed表示句号键
                     g_lastActionWasC = false;  // 重置C键状态
                     StartSmoothMove();
                     // 更新指示器位置
@@ -1585,49 +1586,49 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 switch (vkCode) {
                 case 'H':
                     g_hPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'J':
                     g_jPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'K':
                     g_kPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'L':
                     g_lPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'U':
                     g_uPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'O':
                     g_oPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'N':
                     g_nPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
-                case VK_OEM_COMMA:  // 逗号键释放
-                    g_cmPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                case VK_OEM_PERIOD:  // 句号键释放
+                    g_dotPressed = false;
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_dotPressed) {
                         StopSmoothMove();
                     }
                     break;
