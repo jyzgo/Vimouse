@@ -1,5 +1,3 @@
-当然可以！以下是更新后的 双语 README，已补充你提到的新功能（C 键居中/跨屏）和最佳实践建议。
-
 Vimouse 🖱️⌨️
 A keyboard-driven mouse controller for Vim lovers
 
