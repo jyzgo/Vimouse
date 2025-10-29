@@ -30,7 +30,6 @@ bool g_leftButtonDown = false;  // 左键按下状态
 bool g_rightButtonDown = false;  // 右键按下状态
 HWND g_gridWindow = NULL;  // Grid模式窗口
 HWND g_hwnd = NULL;  // 主窗口句柄
-NOTIFYICONDATA g_nid;  // 托盘图标数据
 bool g_exitRequested = false;  // 退出标志
 
 // Ctrl键状态跟踪
@@ -160,7 +159,7 @@ void SmoothMoveThread() {
         }
 
         // 控制移动频率，使移动更平滑
-        
+
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
@@ -1197,10 +1196,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                     g_leftButtonDown = false;  // 设置左键抬起状态
-                    
+
                     // 更新指示器位置
                     UpdateIndicatorPosition();
-                    
+
                     // 阻止 Ctrl+F 传递给其他程序
                     return 1;
                 }
@@ -1492,11 +1491,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 case 'A':
                     return 1;
                 case VK_LEFT:
-				case VK_UP:
+                case VK_UP:
                 case VK_RIGHT:
                 case VK_DOWN:
                 case VK_F5:
-					return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 
                 default:
                     g_lastActionWasC = false;  // 重置C键状态
@@ -1542,7 +1541,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         g_leftButtonDown = false;
                         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                         UpdateIndicatorPosition();
-                        
+
                     }
                     break;
                 default:
@@ -1556,28 +1555,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 }
 
-// 创建托盘图标
-void CreateTrayIcon() {
-    // 初始化NOTIFYICONDATA结构
-    ZeroMemory(&g_nid, sizeof(NOTIFYICONDATA));
-    g_nid.cbSize = sizeof(NOTIFYICONDATA);
-    g_nid.hWnd = g_hwnd;
-    g_nid.uID = 1;
-    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-    g_nid.uCallbackMessage = WM_USER + 1;
-    g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);  // 使用默认图标
-    wcscpy_s(g_nid.szTip, L"键盘控制鼠标工具");
-
-    // 添加托盘图标
-    Shell_NotifyIcon(NIM_ADD, &g_nid);
-}
-
-// 删除托盘图标
-void RemoveTrayIcon() {
-    Shell_NotifyIcon(NIM_DELETE, &g_nid);
-}
-
-// 创建一个隐藏窗口来接收消息循环
+// 创建一个显示在任务栏的窗口来接收消息循环
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
@@ -1601,32 +1579,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             MessageBox(NULL, L"设置键盘钩子失败", L"错误", MB_OK | MB_ICONERROR);
             PostQuitMessage(1);
         }
-
-        // 创建托盘图标
-        CreateTrayIcon();
-        break;
-
-    case WM_USER + 1:  // 托盘图标消息
-        if (lParam == WM_RBUTTONDOWN) {  // 右键点击托盘图标
-            // 创建弹出菜单
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenu(hMenu, MF_STRING, 1, L"退出");
-
-            // 显示菜单
-            POINT pt;
-            GetCursorPos(&pt);
-            SetForegroundWindow(hwnd);
-            int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
-
-            // 处理菜单选择
-            if (cmd == 1) {  // 退出
-                g_exitRequested = true;
-                PostQuitMessage(0);
-            }
-
-            // 清理菜单
-            DestroyMenu(hMenu);
-        }
         break;
 
     case WM_DESTROY:
@@ -1649,8 +1601,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (g_indicatorWindow) {
             DestroyWindow(g_indicatorWindow);
         }
-        // 删除托盘图标
-        RemoveTrayIcon();
         PostQuitMessage(0);
         break;
 
@@ -1684,12 +1634,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // 创建隐藏窗口
+    // 创建一个可见窗口（显示在任务栏）
     g_hwnd = CreateWindowEx(
         0,
         L"MouseControllerClass",
-        L"键盘控制鼠标工具",
-        0,  // 无样式，隐藏窗口
+        L"Vimouse",
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT,
         300, 200,
         NULL, NULL, hInstance, NULL
@@ -1700,6 +1650,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         CloseHandle(hMutex);
         return 1;
     }
+
+    // 显示窗口（但保持最小化或隐藏在任务栏）
+    ShowWindow(g_hwnd, SW_MINIMIZE);
+    UpdateWindow(g_hwnd);
 
     // 消息循环
     MSG msg;
