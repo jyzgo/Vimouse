@@ -24,6 +24,7 @@
     <ProjectGuid>{8ab400e3-59e8-428b-8af1-fc7559397969}</ProjectGuid>
     <RootNamespace>MouseController</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Vimouse</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -129,7 +130,7 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MouseController.cpp" />
+    <ClCompile Include="Vimouse.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MouseController.rc" />
