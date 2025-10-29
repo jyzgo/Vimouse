@@ -955,7 +955,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         }
 
         // 检查 Win+空格 组合键，确保不被屏蔽
-        if (g_winPressed && vkCode == VK_SPACE) {
+        if (g_winPressed && vkCode != VK_LWIN && vkCode != VK_RWIN) {
             // 不阻止Win+空格，让系统正常处理
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
         }
@@ -1001,7 +1001,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_leftButtonDown = false;  // 设置左键抬起状态
 
             UpdateIndicatorPosition();
-            return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+            return 1;
+            //return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
         }
 
         // 检查 Esc 关闭激活状态
@@ -1159,6 +1160,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                             // 退出hint模式
                             ExitHintMode(true);
                         }
+                        return 1;
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让字母键正常工作
                     }
                 }
