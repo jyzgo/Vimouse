@@ -41,6 +41,10 @@ bool g_hPressed = false;
 bool g_jPressed = false;
 bool g_kPressed = false;
 bool g_lPressed = false;
+bool g_uPressed = false;
+bool g_oPressed = false;
+bool g_nPressed = false;
+bool g_cmPressed = false;
 std::thread* g_moveThread = nullptr;
 bool g_shouldMove = false;
 
@@ -1235,7 +1239,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     case 'L':  // 右移 -> 水平向右滚动
                         mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, g_wheelSpeed, 0);
                         break;
-                    case 'U':  // 再次按U键退出滚轮模式
+                    case 'Y':  // 再次按U键退出滚轮模式
                         ExitWheelMode();
                         break;
                     case 'M':  // 按M键进入hint模式，退出滚轮模式
@@ -1363,7 +1367,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     break;
 
                     // 滚轮模式
-                case 'U':
+                case 'Y':
                     g_wheelMode = !g_wheelMode;  // 切换滚轮模式
                     if (g_wheelMode) {
                         // 进入滚轮模式
