@@ -16,6 +16,7 @@ f：鼠标左键点击
 g：鼠标右键点击
 u：进入滚轮模式（Wheel Mode）
 进入后，使用 h/j/k/l 控制页面滚动（模拟滚轮）
+再次点击u键退出滚轮模式
 i：进入网格模式（Grid Mode）
 r：返回上一个区块（区域）
 m：进入地图模式（Map Mode）
@@ -37,7 +38,7 @@ Map 模式
 2. 按 m 进入 Map 模式，输入两个字母快速跳转到目标大致区域；
 3. 退出 Map 模式后，使用 h/j/k/l 微调鼠标位置；
 4. 按 f 点击确认。
-这一流程结合了大范围跳转与精细控制，极大提升操作效率！
+
 灵感来源
 本项目深受 [warpd](https://github.com/rvaiya/warpd) 启发，但重新设计了更符合个人习惯的快捷键布局。
 联系与维护
@@ -57,6 +58,7 @@ f: Left mouse click
 g: Right mouse click
 u: Enter Wheel Mode
 Use h/j/k/l to scroll the page (simulates mouse wheel)
+Click u ag will quit wheel mode.
 i: Enter Grid Mode
 r: Return to the previous screen region
 m: Enter Map Mode

@@ -1000,6 +1000,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             }
             // 更新指示器位置
             UpdateIndicatorPosition();
+            return 1;
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Ctrl+\正常工作
         }
 
