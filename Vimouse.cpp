@@ -79,9 +79,19 @@ int GetCurrentScreenIndex();
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
     MONITORINFO mi = { sizeof(mi) };
     if (GetMonitorInfo(hMonitor, &mi)) {
-        g_screenRects.push_back(mi.rcWork);  // 使用工作区域（不包括任务栏）
+        g_screenRects.push_back(mi.rcMonitor);  // 使用工作区域（不包括任务栏）
     }
     return TRUE;
+}
+
+
+void DebugLog(const char* format, ...) {
+    char buffer[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    OutputDebugStringA(buffer);
 }
 
 // 获取鼠标当前所在屏幕的索引
@@ -94,6 +104,7 @@ int GetCurrentScreenIndex() {
             return i;
         }
     }
+    DebugLog("find screen id %d\n");
     // 如果找不到鼠标所在屏幕（理论上不应该发生），返回第一个屏幕
     return 0;
 }
@@ -607,6 +618,9 @@ void CreateIndicatorWindow() {
     }
 }
 
+
+
+
 // 进入hint模式
 void EnterHintMode() {
     if (g_hintMode) return;  // 已经在hint模式中
@@ -614,6 +628,7 @@ void EnterHintMode() {
     g_hintMode = true;
     g_currentHint = "";
     g_hintScreenIndex = GetCurrentScreenIndex();
+    DebugLog("hint index %d", g_hintScreenIndex);
 
     // 检查是否有屏幕信息
     if (g_screenRects.empty()) {
@@ -622,6 +637,7 @@ void EnterHintMode() {
         int screenHeight = GetSystemMetrics(SM_CYSCREEN);
         g_hintScreenIndex = 0;
 
+        OutputDebugStringA("Blocked 'M' key\n"); // 安全！
         // 创建一个虚拟的屏幕矩形
         RECT mainScreenRect = { 0, 0, screenWidth, screenHeight };
         g_screenRects.push_back(mainScreenRect);
@@ -649,6 +665,7 @@ void EnterHintMode() {
         ShowWindow(g_indicatorWindow, SW_HIDE);
     }
 }
+
 
 // 退出hint模式
 void ExitHintMode(bool isShowSubGrid = true) {
