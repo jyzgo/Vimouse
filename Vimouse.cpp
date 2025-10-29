@@ -122,7 +122,7 @@ void SmoothMoveThread() {
         bool moved = false;
 
         // 检查是否需要加速
-        if (g_hPressed || g_jPressed || g_kPressed || g_lPressed) {
+        if (g_hPressed || g_jPressed || g_kPressed || g_lPressed || g_uPressed || g_oPressed || g_nPressed || g_cmPressed) {
             // 动态加速：每0.01秒增加速度
             static DWORD lastMoveTime = GetTickCount();
             static DWORD accelerationStartTime = GetTickCount();
@@ -150,6 +150,27 @@ void SmoothMoveThread() {
         }
         if (g_lPressed) {
             newX += g_mouseSpeed / 10;
+            moved = true;
+        }
+        // 添加对角方向移动
+        if (g_uPressed) {
+            newX -= g_mouseSpeed / 10;  // 左
+            newY -= g_mouseSpeed / 10;  // 上
+            moved = true;
+        }
+        if (g_oPressed) {
+            newX += g_mouseSpeed / 10;  // 右
+            newY -= g_mouseSpeed / 10;  // 上
+            moved = true;
+        }
+        if (g_nPressed) {
+            newX -= g_mouseSpeed / 10;  // 左
+            newY += g_mouseSpeed / 10;  // 下
+            moved = true;
+        }
+        if (g_cmPressed) {
+            newX += g_mouseSpeed / 10;  // 右
+            newY += g_mouseSpeed / 10;  // 下
             moved = true;
         }
 
@@ -1366,6 +1387,51 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     UpdateIndicatorPosition();
                     break;
 
+                case 'U':  // 左上移动
+                    if (g_ctrlPressed) {
+                        // Ctrl+U传递给其他程序
+                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    g_uPressed = true;
+                    g_lastActionWasC = false;  // 重置C键状态
+                    StartSmoothMove();
+                    // 更新指示器位置
+                    UpdateIndicatorPosition();
+                    break;
+                case 'O':  // 右上移动
+                    if (g_ctrlPressed) {
+                        // Ctrl+O传递给其他程序
+                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    g_oPressed = true;
+                    g_lastActionWasC = false;  // 重置C键状态
+                    StartSmoothMove();
+                    // 更新指示器位置
+                    UpdateIndicatorPosition();
+                    break;
+                case 'N':  // 左下移动
+                    if (g_ctrlPressed) {
+                        // Ctrl+N传递给其他程序
+                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    g_nPressed = true;
+                    g_lastActionWasC = false;  // 重置C键状态
+                    StartSmoothMove();
+                    // 更新指示器位置
+                    UpdateIndicatorPosition();
+                    break;
+                case VK_OEM_COMMA:  // 右下移动 (逗号键)
+                    if (g_ctrlPressed) {
+                        // Ctrl+逗号传递给其他程序
+                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    g_cmPressed = true;  // 逗号键状态
+                    g_lastActionWasC = false;  // 重置C键状态
+                    StartSmoothMove();
+                    // 更新指示器位置
+                    UpdateIndicatorPosition();
+                    break;
+
                     // 滚轮模式
                 case 'Y':
                     g_wheelMode = !g_wheelMode;  // 切换滚轮模式
@@ -1500,7 +1566,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 case VK_DOWN:
                 case VK_F5:
                 case VK_F11:
-				case VK_F12:
+                case VK_F12:
                     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 
                 default:
@@ -1519,25 +1585,49 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 switch (vkCode) {
                 case 'H':
                     g_hPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'J':
                     g_jPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'K':
                     g_kPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
                         StopSmoothMove();
                     }
                     break;
                 case 'L':
                     g_lPressed = false;
-                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed) {
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                        StopSmoothMove();
+                    }
+                    break;
+                case 'U':
+                    g_uPressed = false;
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                        StopSmoothMove();
+                    }
+                    break;
+                case 'O':
+                    g_oPressed = false;
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                        StopSmoothMove();
+                    }
+                    break;
+                case 'N':
+                    g_nPressed = false;
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
+                        StopSmoothMove();
+                    }
+                    break;
+                case VK_OEM_COMMA:  // 逗号键释放
+                    g_cmPressed = false;
+                    if (!g_hPressed && !g_jPressed && !g_kPressed && !g_lPressed && !g_uPressed && !g_oPressed && !g_nPressed && !g_cmPressed) {
                         StopSmoothMove();
                     }
                     break;
