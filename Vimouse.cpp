@@ -1495,6 +1495,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 case VK_RIGHT:
                 case VK_DOWN:
                 case VK_F5:
+                case VK_F11:
+				case VK_F12:
                     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 
                 default:
