@@ -383,14 +383,14 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             for (int col = 0; col < 26; col++) {
                 // 如果是hint模式下第一个字母，只显示匹配列
                 if (g_currentHint.length() == 1) {
-                    if (col != (g_currentHint[0] - 'a')) {
+                    if (col != (g_currentHint[0] - 'A')) {
                         continue; // 跳过不匹配的列
                     }
                 }
 
                 char hintText[3];
-                hintText[0] = 'a' + col;
-                hintText[1] = 'a' + row;
+                hintText[0] = 'A' + col;
+                hintText[1] = 'A' + row;
                 hintText[2] = '\0';
 
                 RECT textRect = {
@@ -1068,7 +1068,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             ExitGridMode();   // 退出grid模式
             // 更新指示器位置
             UpdateIndicatorPosition();
-            return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+            return 1;
+            //return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
         }
 
         // 如果不处于激活状态，直接返回
