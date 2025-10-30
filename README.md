@@ -31,6 +31,7 @@
 - `w`: 进入tag模式
 #### Tag 模式
 - 进入后屏幕上的tag会高亮,此时按对应的字母按键 光标会移动过去,之后自动退出Tag模式
+- 直接使用鼠标点击高亮的tag可以直接删掉.
 
 #### Grid 模式
 - 使用 `Q` / `W` / `A` / `S` 将鼠标移动到屏幕对应的四分之一区域
@@ -102,6 +103,7 @@ Stay in the flow. Keep your fingers on the home row.
 - All defined tags appear highlighted on screen  
 - Press the corresponding letter (e.g., `A`) to **move the cursor to that tag**  
 - Tag Mode exits automatically after navigation
+- Click tag with mouse will delete it.
 
 ---
 
