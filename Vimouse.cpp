@@ -31,6 +31,7 @@ bool g_rightButtonDown = false;  // 右键按下状态
 HWND g_gridWindow = NULL;  // Grid模式窗口
 HWND g_hwnd = NULL;  // 主窗口句柄
 bool g_exitRequested = false;  // 退出标志
+int g_dotSize = 1;
 
 bool g_iskeyDown = false;
 
@@ -606,11 +607,13 @@ void UpdateIndicatorPosition() {
             width = 6;
             height = 14;
         }
+        width *= g_dotSize;
+        height *= g_dotSize;
         // 将指示器移动到鼠标位置附近（稍微偏移一点，避免遮挡）
         MoveWindow(
             g_indicatorWindow,
-            mousePos.x + 10,  // 在鼠标右下方
-            mousePos.y + 10,
+            mousePos.x + 10 -g_dotSize *4,  // 在鼠标右下方
+            mousePos.y + 10 - g_dotSize *4,
             width, height,  // 8x8像素
             TRUE
         );
@@ -786,6 +789,7 @@ void ExitHintMode(bool isShowSubGrid = true) {
 
     ShowWindow(g_hintWindow, SW_HIDE);
 
+    g_dotSize = 8;
     // 恢复指示器
     UpdateIndicatorPosition();
 
@@ -899,6 +903,7 @@ void ExitGridMode() {
 
     ShowWindow(g_gridWindow, SW_HIDE);
 
+    g_dotSize = 8;
     // 恢复指示器
     UpdateIndicatorPosition();
 }
@@ -1087,17 +1092,13 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
         }
 
+        g_dotSize = 1;
         // 检查 Ctrl+\ 切换激活状态
         if (isKeyDown && vkCode == 'J' && g_ctrlPressed) {
             g_isActive = !g_isActive;
             if (g_isActive) {
 
                 g_currentScreenIndex = GetCurrentScreenIndex();
-                const RECT& screenRect = g_screenRects[g_currentScreenIndex];
-                int centerX = screenRect.left + (screenRect.right - screenRect.left) / 2;
-                int centerY = screenRect.top + (screenRect.bottom - screenRect.top) / 2;
-
-                SetCursorPos(centerX , centerY);
 
                 GetCursorPos(&g_lastMousePos);  // 记录当前位置
                 // 重置C键状态
@@ -1116,6 +1117,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 g_screenRects.clear();
                 EnumDisplayMonitors(NULL, NULL, EnumDisplayMonitorsProc, 0);
             }
+            g_dotSize = 5;
             // 更新指示器位置
             UpdateIndicatorPosition();
             return 1;
@@ -1618,6 +1620,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         // 如果C键是和Ctrl一起按下的，不执行C键功能，直接传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
+                    g_dotSize = 5;
                     if (g_screenRects.empty()) {
                         // 如果没有枚举到屏幕，使用主屏幕
                         int screenWidth = GetSystemMetrics(SM_CXSCREEN);
