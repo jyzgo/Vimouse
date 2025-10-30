@@ -10,7 +10,6 @@
 #include <fstream>
 #include <sstream>
 
-#define TRAY_ICON_ID 1001
 // 全局变量
 HHOOK g_keyboardHook = NULL;
 bool g_isActive = true;  // 默认激活状态
@@ -2340,61 +2339,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             MessageBox(NULL, L"设置键盘钩子失败", L"错误", MB_OK | MB_ICONERROR);
             PostQuitMessage(1);
         }
-
-        {
-            // 👇 添加托盘图标
-            NOTIFYICONDATA nid = { 0 };
-            nid.cbSize = sizeof(NOTIFYICONDATA);
-            nid.hWnd = g_hwnd;                  // 消息接收窗口
-            nid.uID = TRAY_ICON_ID;
-            nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE;
-            nid.uCallbackMessage = WM_APP + 1;  // 自定义消息
-            nid.hIcon = LoadIcon(NULL, IDI_APPLICATION); // 或加载你自己的图标
-            wcscpy_s(nid.szTip, L"Vimouse - 点击右键退出");
-
-            Shell_NotifyIcon(NIM_ADD, &nid);
-        }
-
-        break;
-    case WM_APP + 1: // 托盘图标回调消息
-        if (lParam == WM_RBUTTONUP) {
-            // 创建右键菜单
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenu(hMenu, MF_STRING, 100, L"退出 Vimouse");
-
-            // 获取鼠标位置（用于弹出菜单）
-            POINT pt;
-            GetCursorPos(&pt);
-
-            // 设置菜单字体（可选）
-            SetMenuDefaultItem(hMenu, (UINT)-1, FALSE);
-
-            // 弹出菜单（必须用 TrackPopupMenuEx + TPM_RETURNCMD 才能阻塞）
-            UINT cmd = TrackPopupMenuEx(
-                hMenu,
-                TPM_RETURNCMD | TPM_RIGHTBUTTON,
-                pt.x, pt.y,
-                g_hwnd,
-                NULL
-            );
-
-            if (cmd == 100) {
-                PostMessage(g_hwnd, WM_CLOSE, 0, 0); // 触发 WM_DESTROY
-            }
-
-            DestroyMenu(hMenu);
-        }
         break;
 
     case WM_DESTROY:
-    {
-        // 移除托盘图标
-        NOTIFYICONDATA nid = { 0 };
-        nid.cbSize = sizeof(NOTIFYICONDATA);
-        nid.hWnd = g_hwnd;
-        nid.uID = TRAY_ICON_ID;
-        Shell_NotifyIcon(NIM_DELETE, &nid);
-    }
         // 停止平滑移动
         StopSmoothMove();
 
@@ -2472,7 +2419,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     // 显示窗口（但保持最小化或隐藏在任务栏）
-    ShowWindow(g_hwnd,SW_HIDE);
+    ShowWindow(g_hwnd, SW_MINIMIZE);
     UpdateWindow(g_hwnd);
 
     // 消息循环
