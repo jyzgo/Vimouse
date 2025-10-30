@@ -57,6 +57,11 @@ int g_acceleratedSpeed = 10;  // 每次加速的增量
 int g_maxSpeed = 2000;  // 最大速度限制
 int g_lastSetSpeed = 10;  // 记录最后一次设置的速度值
 
+// 位置容器相关变量
+std::vector<POINT> g_positionStack;  // 存储鼠标位置的容器
+int g_mousePosIndex = -1;  // 当前位置索引，-1表示没有记录
+const int MAX_POSITIONS = 10;  // 容器最大容量
+
 // 函数声明
 void StartSmoothMove();
 void StopSmoothMove();
@@ -79,6 +84,9 @@ void CreateHintWindow();
 void CreateIndicatorWindow();
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
 int GetCurrentScreenIndex();
+void AddMousePositionToStack();
+void GoToPreviousPosition();
+void GoToNextPosition();
 
 // 枚举显示器回调函数
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -112,6 +120,61 @@ int GetCurrentScreenIndex() {
     DebugLog("find screen id %d\n");
     // 如果找不到鼠标所在屏幕（理论上不应该发生），返回第一个屏幕
     return 0;
+}
+
+// 将当前鼠标位置添加到容器中
+void AddMousePositionToStack() {
+    POINT currentPos;
+    GetCursorPos(&currentPos);
+
+    // 如果容器已满，移除最早的位置
+    if (g_positionStack.size() >= MAX_POSITIONS) {
+        g_positionStack.erase(g_positionStack.begin());
+        // 调整索引
+        if (g_mousePosIndex >= 0) {
+            g_mousePosIndex--;
+        }
+    }
+
+    // 添加当前位置
+    g_positionStack.push_back(currentPos);
+    // 设置索引为最后一个位置
+    g_mousePosIndex = g_positionStack.size() - 1;
+}
+
+void UpdatePosByindex() {
+
+    POINT targetPos = g_positionStack[g_mousePosIndex];
+    SetCursorPos(targetPos.x, targetPos.y);
+}
+
+// 回到上一个位置（从后往前）
+void GoToPreviousPosition() {
+    if (g_mousePosIndex > 0 && g_positionStack.size() > 0) {
+        g_mousePosIndex--;
+        UpdatePosByindex();
+
+    }
+    else if (g_mousePosIndex == 0)
+    {
+        g_mousePosIndex = g_positionStack.size() - 1;
+        UpdatePosByindex();
+        
+    }
+    
+}
+
+// 前进到下一个位置
+void GoToNextPosition() {
+    if (g_mousePosIndex >= 0 && g_mousePosIndex < (int)g_positionStack.size() - 1) {
+        g_mousePosIndex++;
+        UpdatePosByindex();
+    }
+    else if (g_mousePosIndex >= (int)g_positionStack.size() - 1)
+    {
+        g_mousePosIndex = 0;
+        UpdatePosByindex();
+    }
 }
 
 // 平滑移动线程函数
@@ -536,12 +599,12 @@ void UpdateIndicatorPosition() {
         GetCursorPos(&mousePos);
 
 
-		int width = 14;
+        int width = 14;
         int height = 6;
         if (g_iskeyDown)
         {
             width = 6;
-			height = 14;
+            height = 14;
         }
         // 将指示器移动到鼠标位置附近（稍微偏移一点，避免遮挡）
         MoveWindow(
@@ -1000,7 +1063,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         DWORD vkCode = pKeyboard->vkCode;
         bool isKeyDown = (wParam == WM_KEYDOWN);
         bool isKeyUp = (wParam == WM_KEYUP);
-		g_iskeyDown = isKeyDown;
+        g_iskeyDown = isKeyDown;
         // 更新Ctrl键状态
         if (vkCode == VK_CONTROL || vkCode == VK_LCONTROL || vkCode == VK_RCONTROL) {
             g_ctrlPressed = isKeyDown;
@@ -1490,15 +1553,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     g_mouseSpeed = 80;
                     g_lastSetSpeed = 80;
                     break;
-                case 'E':
-                    g_mouseSpeed = 160;
-                    g_lastSetSpeed = 160;
-                    break;
-                case 'R':
-                    g_mouseSpeed = 320;
-                    g_lastSetSpeed = 320;
-                    break;
-
+  
                     // 鼠标点击
                 case 'F':  // 左键点击
                     if (!g_leftButtonDown) {
@@ -1506,6 +1561,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         // 更新指示器位置（会触发重绘）
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                         UpdateIndicatorPosition();
+                        AddMousePositionToStack();
                         g_lastActionWasC = false;  // 重置C键状态
                     }
                     return 1;
@@ -1593,6 +1649,19 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 case VK_F11:
                 case VK_F12:
                     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+
+                case 'R':  // 回到上一个位置
+                    if (!g_gridMode) {  // 只在非grid模式下执行
+                        GoToPreviousPosition();
+                        g_lastActionWasC = false;  // 重置C键状态
+                    }
+                    break;
+                case 'E':  // 前进到下一个位置
+                    if (!g_gridMode) {  // 只在非grid模式下执行
+                        GoToNextPosition();
+                        g_lastActionWasC = false;  // 重置C键状态
+                    }
+                    break;
 
                 default:
                     g_lastActionWasC = false;  // 重置C键状态
