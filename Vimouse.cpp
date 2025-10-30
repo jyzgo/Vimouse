@@ -88,6 +88,7 @@ int GetCurrentScreenIndex();
 void AddMousePositionToStack();
 void GoToPreviousPosition();
 void GoToNextPosition();
+long DistanceSquared(POINT a, POINT b);
 
 // 枚举显示器回调函数
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -127,6 +128,18 @@ int GetCurrentScreenIndex() {
 void AddMousePositionToStack() {
     POINT currentPos;
     GetCursorPos(&currentPos);
+
+	//get last position
+    if (!g_positionStack.empty()) {
+        POINT lastPos = g_positionStack.back();
+        // 如果当前位置与上一个位置相同，则不添加
+        if (currentPos.x == lastPos.x && currentPos.y == lastPos.y) {
+            return;
+        }
+        if(DistanceSquared(currentPos, lastPos) < 25) { // 距离小于5像素
+            return;
+		}
+	}
 
     // 如果容器已满，移除最早的位置
     if (g_positionStack.size() >= MAX_POSITIONS) {
