@@ -78,6 +78,7 @@ struct TagInfo {
     bool active; // 用于标记是否在tag模式下
 };
 
+
 std::vector<TagInfo> g_tags;
 char g_nextLetter = 'A';  // 下一个要使用的字母
 bool g_tagMode = false;  // 是否处于tag模式
@@ -95,6 +96,7 @@ void ExitGridMode();
 void MoveToGridArea(int direction);
 void MoveToGridCorner(int corner);
 void ReturnToPreviousGrid();
+bool RemoveTagBySameLetter(char letter);
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -105,6 +107,7 @@ void CreateGridWindow();
 void CreateHintWindow();
 void CreateIndicatorWindow();
 void CreateTagWindow(int x, int y, char letter);
+HWND CreateTagWindowNoSave(int x, int y, char letter);
 void RemoveTagWindow(int x, int y);
 void EnterTagMode();
 void ExitTagMode();
@@ -118,7 +121,6 @@ long DistanceSquared(POINT a, POINT b);
 std::string GetConfigPath();
 void SaveTagsToConfig();
 void LoadTagsFromConfig();
-HWND CreateTagWindowNoSave(int x, int y, char letter);
 void RemoveTagWindowByLetter(char letter);
 
 void HideAllTagWindows() {
@@ -246,6 +248,7 @@ void LoadTagsFromConfig() {
                 int x = std::stoi(xStr);
                 int y = std::stoi(yStr);
 
+                RemoveTagBySameLetter(letter);
                 // 创建标签窗口并添加到全局标签向量
                 HWND hwnd = CreateTagWindowNoSave(x, y, letter);
 
@@ -291,7 +294,7 @@ HWND CreateTagWindowNoSave(int x, int y, char letter) {
         L"TagWindowClass",
         NULL,
         WS_POPUP,
-        x, y, 30, 30,  // 位置和大小
+        x-15, y-15, 30, 30,  // 位置和大小
         NULL,
         NULL,
         GetModuleHandle(NULL),
@@ -944,6 +947,7 @@ void UpdateIndicatorPosition() {
 
 // 创建Tag窗口
 void CreateTagWindow(int x, int y, char letter) {
+    RemoveTagBySameLetter(letter);
     // 注册tag窗口类
     WNDCLASSEX wc = { 0 };
     wc.cbSize = sizeof(WNDCLASSEX);
@@ -961,7 +965,7 @@ void CreateTagWindow(int x, int y, char letter) {
         L"TagWindowClass",
         NULL,
         WS_POPUP,
-        x, y, 30, 30,  // 位置和大小
+        x-15, y-15, 30, 30,  // 位置和大小
         NULL,
         NULL,
         GetModuleHandle(NULL),
@@ -1016,8 +1020,6 @@ void RemoveTagWindowByLetter(char letter) {
             g_tags.erase(it);
             // 保存到配置文
             SaveTagsToConfig();
-            DebugLog("rrr");
-            ExitTagMode();
             break;
         }
     }
@@ -1052,6 +1054,7 @@ void ExitTagMode() {
             InvalidateRect(tag.hwnd, NULL, TRUE); // 重绘
         }
     }
+    ShowTagWindowsNonInteractive();
 }
 
 // 跳转到标签位置
@@ -2060,7 +2063,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 检查当前位置是否已有标签
                     bool tagExists = false;
                     for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
-                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos, it->pos) < 800) {
+                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos, it->pos) < 600) {
                             // 移除现有标签
                             DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
                             DestroyWindow(it->hwnd);
@@ -2071,13 +2074,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     }
 
                     if (!tagExists) {
-                        // 如果标签数量达到26（A-Z），移除第一个
-                        if (g_tags.size() >= 26) {
-                            if (!g_tags.empty()) {
-                                DestroyWindow(g_tags[0].hwnd);
-                                g_tags.erase(g_tags.begin());
-                            }
-                        }
+					
 
                         // 创建新标签
                         CreateTagWindow(currentPos.x, currentPos.y, g_nextLetter);
@@ -2310,6 +2307,20 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     }
 
     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+}
+
+bool RemoveTagBySameLetter(char letter) {
+    auto it = std::find_if(g_tags.begin(), g_tags.end(),
+        [letter](const TagInfo& t) { return t.letter == letter; }
+    );
+    if (it != g_tags.end()) {
+        if (it->hwnd) {
+            DestroyWindow(it->hwnd);
+        }
+        g_tags.erase(it);
+        return true;
+    }
+    return false;
 }
 
 // 创建一个显示在任务栏的窗口来接收消息循环
