@@ -1129,8 +1129,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_leftButtonDown = false;  // 设置左键抬起状态
 
             UpdateIndicatorPosition();
-            return 1;
-            //return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+			if (g_ctrlPressed) {
+				return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+			}
+			return 1;
+
         }
 
         // 检查 Esc 关闭激活状态
