@@ -516,12 +516,25 @@ LRESULT CALLBACK IndicatorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     return 0;
 }
 
+
+POINT g_lastMousePoint; // 假设已在全局定义
+
+// 辅助函数：计算两点间欧几里得距离的平方（避免开方，提高效率）
+inline long DistanceSquared(POINT a, POINT b) {
+    long dx = a.x - b.x;
+    long dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+
+
 // 更新指示器位置
 void UpdateIndicatorPosition() {
     if (g_indicatorWindow && g_isActive && !g_hintMode && !g_gridMode) {
         // 获取当前鼠标位置
         POINT mousePos;
         GetCursorPos(&mousePos);
+
 
 		int width = 14;
         int height = 6;
