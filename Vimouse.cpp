@@ -1182,7 +1182,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     }
                     else {
                         // 处理字母键
-                        char letter = (char)(vkCode - 'A' + 'a');  // 转换为小写
+                        //char letter = (char)(vkCode - 'A' + 'a');  // 转换为小写
+                        char letter = vkCode;
 
                         if (g_currentHint.length() == 0) {
                             // 第一个字母，更新显示（只显示匹配列）
@@ -1197,8 +1198,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                             // 检查数组边界
                             if (g_hintScreenIndex >= 0 && g_hintScreenIndex < (int)g_screenRects.size()) {
                                 // 找到对应的位置
-                                int col = g_currentHint[0] - 'a';
-                                int row = g_currentHint[1] - 'a';
+                                int col = g_currentHint[0] - 'A';
+                                int row = g_currentHint[1] - 'A';
 
                                 const RECT& screenRect = g_screenRects[g_hintScreenIndex];
                                 int blockWidth = (screenRect.right - screenRect.left) / 26;
