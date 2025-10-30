@@ -9,7 +9,8 @@
 
 ### 快捷键说明
 
-- **启动 Normal 模式**：`Ctrl + J`
+- **启动 Normal 模式**：`Ctrl + J` or `Crtl + K` 
+  - 使用`Ctrl + K` 时,光标会自动居中
 - **退出模式**：`Esc` 或 `Enter`  
   - 使用 `Enter` 退出时，会自动点击鼠标左键，用于聚焦当前窗口
 
@@ -54,7 +55,8 @@
 
 ### Key Bindings
 
-- **Enter Normal Mode**: `Ctrl + J`
+- **Enter Normal Mode**: `Ctrl + J` or `Ctrl + K`
+  -`Ctrl + K ` will center the cursor.
 - **Exit Mode**: `Esc` or `Enter`  
   - Pressing `Enter` will also trigger a left mouse click to focus the current window
 
