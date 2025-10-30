@@ -1,4 +1,5 @@
 ﻿#include <windows.h>
+#include <shlobj.h>  // 添加此头文件
 #include <shellapi.h>
 #include <iostream>
 #include <thread>
@@ -6,6 +7,8 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <fstream>
+#include <sstream>
 
 // 全局变量
 HHOOK g_keyboardHook = NULL;
@@ -52,7 +55,7 @@ std::thread* g_moveThread = nullptr;
 bool g_shouldMove = false;
 
 // 加速相关变量
-int g_originalSpeed = 15;  // 记录原始速度
+int g_originalSpeed = 10;  // 记录原始速度
 bool g_isAccelerating = false;  // 是否正在加速
 int g_acceleratedSpeed = 10;  // 每次加速的增量
 int g_maxSpeed = 2000;  // 最大速度限制
@@ -62,6 +65,18 @@ int g_lastSetSpeed = 10;  // 记录最后一次设置的速度值
 std::vector<POINT> g_positionStack;  // 存储鼠标位置的容器
 int g_mousePosIndex = -1;  // 当前位置索引，-1表示没有记录
 const int MAX_POSITIONS = 10;  // 容器最大容量
+
+// 标签系统相关变量
+struct TagInfo {
+    HWND hwnd;
+    POINT pos;
+    char letter;
+    bool active; // 用于标记是否在tag模式下
+};
+
+std::vector<TagInfo> g_tags;
+char g_nextLetter = 'A';  // 下一个要使用的字母
+bool g_tagMode = false;  // 是否处于tag模式
 
 // 函数声明
 void StartSmoothMove();
@@ -79,16 +94,25 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK IndicatorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void UpdateIndicatorPosition();
 void CreateGridWindow();
 void CreateHintWindow();
 void CreateIndicatorWindow();
+void CreateTagWindow(int x, int y, char letter);
+void RemoveTagWindow(int x, int y);
+void EnterTagMode();
+void ExitTagMode();
+void JumpToTag(char letter);
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
 int GetCurrentScreenIndex();
 void AddMousePositionToStack();
 void GoToPreviousPosition();
 void GoToNextPosition();
 long DistanceSquared(POINT a, POINT b);
+std::string GetConfigPath();
+void SaveTagsToConfig();
+void LoadTagsFromConfig();
 
 // 枚举显示器回调函数
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -99,7 +123,6 @@ BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT 
     return TRUE;
 }
 
-
 void DebugLog(const char* format, ...) {
     char buffer[512];
     va_list args;
@@ -107,6 +130,76 @@ void DebugLog(const char* format, ...) {
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     OutputDebugStringA(buffer);
+}
+
+// 获取配置文件路径
+std::string GetConfigPath() {
+    char path[MAX_PATH];
+    HRESULT result = SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, path);
+    if (FAILED(result)) {
+        // 如果获取用户配置文件夹失败，使用当前目录
+        GetModuleFileNameA(NULL, path, MAX_PATH);
+        char* lastSlash = strrchr(path, '\\');
+        if (lastSlash) {
+            *(lastSlash + 1) = '\0';
+        }
+        strcat_s(path, MAX_PATH, "Vimouse.config");
+        return std::string(path);
+    }
+
+    std::string configPath = std::string(path) + "/Vimouse/.config";
+    return configPath;
+}
+
+// 保存标签到配置文件
+void SaveTagsToConfig() {
+    std::string configPath = GetConfigPath();
+
+    // 确保目录存在
+    size_t lastSlash = configPath.find_last_of("/");
+    if (lastSlash != std::string::npos) {
+        std::string dirPath = configPath.substr(0, lastSlash);
+        CreateDirectoryA(dirPath.c_str(), NULL);
+    }
+
+    std::ofstream file(configPath);
+    if (file.is_open()) {
+        for (const auto& tag : g_tags) {
+            if (tag.active) {
+                // 格式: key,letter,x,y
+                long long key = (long long)tag.pos.x * 10000 + tag.pos.y;
+                file << key << "," << tag.letter << "," << tag.pos.x << "," << tag.pos.y << "\n";
+            }
+        }
+        file.close();
+    }
+}
+
+// 从配置文件加载标签
+void LoadTagsFromConfig() {
+    std::string configPath = GetConfigPath();
+    std::ifstream file(configPath);
+    if (file.is_open()) {
+        std::string line;
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            std::string keyStr, letterStr, xStr, yStr;
+            if (std::getline(iss, keyStr, ',') &&
+                std::getline(iss, letterStr, ',') &&
+                std::getline(iss, xStr, ',') &&
+                std::getline(iss, yStr)) {
+
+                long long key = std::stoll(keyStr);
+                char letter = letterStr[0];
+                int x = std::stoi(xStr);
+                int y = std::stoi(yStr);
+
+                // 创建标签窗口
+                CreateTagWindow(x, y, letter);
+            }
+        }
+        file.close();
+    }
 }
 
 // 获取鼠标当前所在屏幕的索引
@@ -129,17 +222,17 @@ void AddMousePositionToStack() {
     POINT currentPos;
     GetCursorPos(&currentPos);
 
-	//get last position
+    //get last position
     if (!g_positionStack.empty()) {
         POINT lastPos = g_positionStack.back();
         // 如果当前位置与上一个位置相同，则不添加
         if (currentPos.x == lastPos.x && currentPos.y == lastPos.y) {
             return;
         }
-        if(DistanceSquared(currentPos, lastPos) < 25) { // 距离小于5像素
+        if (DistanceSquared(currentPos, lastPos) < 25) { // 距离小于5像素
             return;
-		}
-	}
+        }
+    }
 
     // 如果容器已满，移除最早的位置
     if (g_positionStack.size() >= MAX_POSITIONS) {
@@ -173,9 +266,9 @@ void GoToPreviousPosition() {
     {
         g_mousePosIndex = g_positionStack.size() - 1;
         UpdatePosByindex();
-        
+
     }
-    
+
 }
 
 // 前进到下一个位置
@@ -291,6 +384,91 @@ void StopSmoothMove() {
         g_isAccelerating = false;
         UpdateIndicatorPosition();
     }
+}
+
+// 创建Tag窗口的窗口过程
+LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        // 获取窗口客户区大小
+        RECT clientRect;
+        GetClientRect(hwnd, &clientRect);
+
+        // 创建内存DC进行双缓冲绘制
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc,
+            clientRect.right - clientRect.left,
+            clientRect.bottom - clientRect.top);
+        HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
+
+        // 绘制黑色背景
+        HBRUSH blackBrush = CreateSolidBrush(RGB(0, 0, 0));
+        FillRect(memDC, &clientRect, blackBrush);
+        DeleteObject(blackBrush);
+
+        // 设置文本颜色和模式
+        SetTextColor(memDC, RGB(255, 0, 0)); // 红色文字
+        SetBkMode(memDC, TRANSPARENT);
+
+        // 根据tag模式设置字体大小
+        int fontSize = g_tagMode ? 24 : 16;
+        HFONT font = CreateFont(
+            fontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+        HGDIOBJ oldFont = SelectObject(memDC, font);
+
+        // 绘制字母
+        char letter[2] = { 'A', '\0' }; // 临时初始化
+        for (auto& tag : g_tags) {
+            if (tag.hwnd == hwnd) {
+                letter[0] = tag.letter;
+                break;
+            }
+        }
+
+        RECT textRect = { 0, 0, clientRect.right, clientRect.bottom };
+        DrawTextA(memDC, letter, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        // 恢复字体并删除
+        SelectObject(memDC, oldFont);
+        DeleteObject(font);
+
+        // 将内存DC内容复制到实际DC
+        BitBlt(hdc, 0, 0,
+            clientRect.right - clientRect.left,
+            clientRect.bottom - clientRect.top,
+            memDC, 0, 0, SRCCOPY);
+
+        // 清理资源
+        SelectObject(memDC, oldFont);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd, &ps);
+        break;
+    }
+    case WM_LBUTTONDOWN: {
+        // 在tag模式下点击标签
+        if (g_tagMode) {
+            char letter = 'A'; // 临时初始化
+            for (const auto& tag : g_tags) {
+                if (tag.hwnd == hwnd) {
+                    letter = tag.letter;
+                    break;
+                }
+            }
+            JumpToTag(letter);
+        }
+        break;
+    }
+    default:
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0;
 }
 
 // 创建Grid窗口的窗口过程
@@ -625,8 +803,8 @@ void UpdateIndicatorPosition() {
         // 将指示器移动到鼠标位置附近（稍微偏移一点，避免遮挡）
         MoveWindow(
             g_indicatorWindow,
-            mousePos.x + 10 -g_dotSize *4,  // 在鼠标右下方
-            mousePos.y + 10 - g_dotSize *4,
+            mousePos.x + 10 - g_dotSize * 4,  // 在鼠标右下方
+            mousePos.y + 10 - g_dotSize * 4,
             width, height,  // 8x8像素
             TRUE
         );
@@ -640,6 +818,109 @@ void UpdateIndicatorPosition() {
     else if (g_indicatorWindow) {
         // 如果不激活或在hint模式/grid模式下则隐藏指示器
         ShowWindow(g_indicatorWindow, SW_HIDE);
+    }
+}
+
+// 创建Tag窗口
+void CreateTagWindow(int x, int y, char letter) {
+    // 注册tag窗口类
+    WNDCLASSEX wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEX);
+    wc.lpfnWndProc = TagWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"TagWindowClass";
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+
+    RegisterClassEx(&wc);
+
+    // 创建tag窗口
+    HWND hwnd = CreateWindowEx(
+        WS_EX_TOPMOST | WS_EX_LAYERED,  // 置顶且支持透明
+        L"TagWindowClass",
+        NULL,
+        WS_POPUP,
+        x, y, 30, 30,  // 位置和大小
+        NULL,
+        NULL,
+        GetModuleHandle(NULL),
+        NULL
+    );
+
+    if (hwnd) {
+        // 设置窗口透明度 (半透)
+        SetLayeredWindowAttributes(hwnd, 0, g_tagMode ? 255 : 150, LWA_ALPHA);
+        ShowWindow(hwnd, SW_SHOW);
+
+        // 添加到标签列表
+        TagInfo tag;
+        tag.hwnd = hwnd;
+        tag.pos.x = x;
+        tag.pos.y = y;
+        tag.letter = letter;
+        tag.active = true;
+        g_tags.push_back(tag);
+
+        // 保存到配置文件
+        SaveTagsToConfig();
+    }
+}
+
+// 移除Tag窗口
+void RemoveTagWindow(int x, int y) {
+    for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
+        if (it->pos.x == x && it->pos.y == y) {
+            // 销毁窗口
+            if (it->hwnd) {
+                DestroyWindow(it->hwnd);
+            }
+            // 从列表中移除
+            g_tags.erase(it);
+            // 保存到配置文件
+            SaveTagsToConfig();
+            break;
+        }
+    }
+}
+
+// 进入tag模式
+void EnterTagMode() {
+    if (g_tagMode) return;
+
+    g_tagMode = true;
+
+    // 更新所有标签窗口的透明度
+    for (auto& tag : g_tags) {
+        if (tag.hwnd) {
+            SetLayeredWindowAttributes(tag.hwnd, 0, 255, LWA_ALPHA); // 不透明
+            InvalidateRect(tag.hwnd, NULL, TRUE); // 重绘
+        }
+    }
+}
+
+// 退出tag模式
+void ExitTagMode() {
+    if (!g_tagMode) return;
+
+    g_tagMode = false;
+
+    // 更新所有标签窗口的透明度
+    for (auto& tag : g_tags) {
+        if (tag.hwnd) {
+            SetLayeredWindowAttributes(tag.hwnd, 0, 150, LWA_ALPHA); // 半透
+            InvalidateRect(tag.hwnd, NULL, TRUE); // 重绘
+        }
+    }
+}
+
+// 跳转到标签位置
+void JumpToTag(char letter) {
+    for (const auto& tag : g_tags) {
+        if (tag.letter == letter) {
+            SetCursorPos(tag.pos.x, tag.pos.y);
+            ExitTagMode();
+            break;
+        }
     }
 }
 
@@ -1107,7 +1388,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         g_dotSize = 1;
         // 检查 Ctrl+\ 切换激活状态
-        if (isKeyDown && (vkCode == 'J'|| vkCode == 'K') && g_ctrlPressed) {
+        if (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_ctrlPressed) {
             g_isActive = !g_isActive;
             if (g_isActive) {
 
@@ -1117,7 +1398,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     const RECT& screenRect = g_screenRects[g_currentScreenIndex];
                     int centerX = screenRect.left + (screenRect.right - screenRect.left) / 2;
                     int centerY = screenRect.top + (screenRect.bottom - screenRect.top) / 2;
-					SetCursorPos(centerX, centerY);
+                    SetCursorPos(centerX, centerY);
                 }
 
                 GetCursorPos(&g_lastMousePos);  // 记录当前位置
@@ -1159,10 +1440,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_leftButtonDown = false;  // 设置左键抬起状态
 
             UpdateIndicatorPosition();
-			if (g_ctrlPressed) {
-				return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
-			}
-			return 1;
+            if (g_ctrlPressed) {
+                return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+            }
+            return 1;
 
         }
 
@@ -1390,12 +1671,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         break;
                         // 速度键：QWER 不退出滚轮模式，但改变速度
                     case 'Q':
-                        g_mouseSpeed = 20;
-                        g_lastSetSpeed = 20;
+                        // QW键功能留空
                         break;
                     case 'W':
-                        g_mouseSpeed = 80;
-                        g_lastSetSpeed = 80;
+                        // QW键功能留空
                         break;
                     case 'E':
                         g_mouseSpeed = 160;
@@ -1577,17 +1856,44 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     g_lastActionWasC = false;  // 重置C键状态
                     break;
 
-                    // 速度设置
+                    // 标签功能
                 case 'Q':
-                    g_mouseSpeed = 20;
-                    g_lastSetSpeed = 20;
-                    break;
-                case 'W':
-                    g_mouseSpeed = 80;
-                    g_lastSetSpeed = 80;
-                    break;
-  
-                    // 鼠标点击
+                {
+                    // 检查当前位置是否已有标签
+                    bool tagExists = false;
+                    for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
+                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y) {
+                            // 移除现有标签
+                            DestroyWindow(it->hwnd);
+                            g_tags.erase(it);
+                            tagExists = true;
+                            break;
+                        }
+                    }
+
+                    if (!tagExists) {
+                        // 如果标签数量达到26（A-Z），移除第一个
+                        if (g_tags.size() >= 26) {
+                            if (!g_tags.empty()) {
+                                DestroyWindow(g_tags[0].hwnd);
+                                g_tags.erase(g_tags.begin());
+                            }
+                        }
+
+                        // 创建新标签
+                        CreateTagWindow(currentPos.x, currentPos.y, g_nextLetter);
+
+                        // 更新下一个字母
+                        g_nextLetter = (g_nextLetter - 'A' + 1) % 26 + 'A';
+                    }
+
+                    // 保存到配置文件
+                    SaveTagsToConfig();
+                }
+                return 1;
+                break;
+
+                // 鼠标点击
                 case 'F':  // 左键点击
                     if (!g_leftButtonDown) {
                         g_leftButtonDown = true;  // 设置左键按下状态
@@ -1673,6 +1979,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     EnterHintMode();
                     g_lastActionWasC = false;  // 重置C键状态
                     break;
+                case VK_BACK:  // Backspace键进入tag模式
+                    EnterTagMode();
+                    return 1;
+                    break;
                 case 'A':
                     return 1;
                 case VK_LEFT:
@@ -1708,6 +2018,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 return 1;
             }
             else if (isKeyUp) {
+                // 处理Backspace键释放（退出tag模式）
+                if (vkCode == VK_BACK && g_tagMode) {
+                    ExitTagMode();
+                }
+
                 UpdateIndicatorPosition();
                 // 处理按键释放
                 switch (vkCode) {
@@ -1796,6 +2111,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 创建指示器窗口
         CreateIndicatorWindow();
 
+        // 加载标签配置
+        LoadTagsFromConfig();
+
         // 设置键盘钩子
         g_keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc,
             GetModuleHandle(NULL), 0);
@@ -1825,6 +2143,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (g_indicatorWindow) {
             DestroyWindow(g_indicatorWindow);
         }
+        // 销毁所有标签窗口
+        for (auto& tag : g_tags) {
+            if (tag.hwnd) {
+                DestroyWindow(tag.hwnd);
+            }
+        }
+        g_tags.clear();
         PostQuitMessage(0);
         break;
 
