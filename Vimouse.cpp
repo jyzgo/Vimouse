@@ -32,6 +32,8 @@ HWND g_gridWindow = NULL;  // Grid模式窗口
 HWND g_hwnd = NULL;  // 主窗口句柄
 bool g_exitRequested = false;  // 退出标志
 
+bool g_iskeyDown = false;
+
 // Ctrl键状态跟踪
 bool g_ctrlPressed = false;  // 跟踪Ctrl键状态
 bool g_winPressed = false;   // 跟踪Win键状态
@@ -521,12 +523,19 @@ void UpdateIndicatorPosition() {
         POINT mousePos;
         GetCursorPos(&mousePos);
 
+		int width = 14;
+        int height = 6;
+        if (g_iskeyDown)
+        {
+            width = 6;
+			height = 14;
+        }
         // 将指示器移动到鼠标位置附近（稍微偏移一点，避免遮挡）
         MoveWindow(
             g_indicatorWindow,
             mousePos.x + 10,  // 在鼠标右下方
             mousePos.y + 10,
-            14, 6,  // 8x8像素
+            width, height,  // 8x8像素
             TRUE
         );
 
@@ -978,7 +987,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         DWORD vkCode = pKeyboard->vkCode;
         bool isKeyDown = (wParam == WM_KEYDOWN);
         bool isKeyUp = (wParam == WM_KEYUP);
-
+		g_iskeyDown = isKeyDown;
         // 更新Ctrl键状态
         if (vkCode == VK_CONTROL || vkCode == VK_LCONTROL || vkCode == VK_RCONTROL) {
             g_ctrlPressed = isKeyDown;
