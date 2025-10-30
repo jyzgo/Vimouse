@@ -77,6 +77,7 @@ struct TagInfo {
 std::vector<TagInfo> g_tags;
 char g_nextLetter = 'A';  // 下一个要使用的字母
 bool g_tagMode = false;  // 是否处于tag模式
+bool g_wTagMode = false; // 是否通过W键进入的tag模式
 
 // 函数声明
 void StartSmoothMove();
@@ -410,7 +411,7 @@ LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         DeleteObject(blackBrush);
 
         // 设置文本颜色和模式
-        SetTextColor(memDC, RGB(255, 0, 0)); // 红色文字
+        SetTextColor(memDC, RGB(255, 255, 255)); // 白色文字
         SetBkMode(memDC, TRANSPARENT);
 
         // 根据tag模式设置字体大小
@@ -1862,8 +1863,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 检查当前位置是否已有标签
                     bool tagExists = false;
                     for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
-                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y) {
+                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos,it->pos) <500) {
                             // 移除现有标签
+							DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
                             DestroyWindow(it->hwnd);
                             g_tags.erase(it);
                             tagExists = true;
@@ -1886,14 +1888,21 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         // 更新下一个字母
                         g_nextLetter = (g_nextLetter - 'A' + 1) % 26 + 'A';
                     }
-
-                    // 保存到配置文件
                     SaveTagsToConfig();
+                    return 1;
                 }
-                return 1;
-                break;
+                case 'W':
+                    if (g_ctrlPressed) {
+                        // 如果W键是和Ctrl一起按下的，不执行W键功能，直接传递给其他程序
+                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    // 按W键进入tag模式
+                    g_wTagMode = true;
+                    EnterTagMode();
+                    g_lastActionWasC = false;  // 重置C键状态
+                    break;
 
-                // 鼠标点击
+                    // 鼠标点击
                 case 'F':  // 左键点击
                     if (!g_leftButtonDown) {
                         g_leftButtonDown = true;  // 设置左键按下状态
@@ -2021,6 +2030,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 // 处理Backspace键释放（退出tag模式）
                 if (vkCode == VK_BACK && g_tagMode) {
                     ExitTagMode();
+                }
+
+                // 处理W键释放（如果是通过W键进入的tag模式）
+                if (vkCode == 'W' && g_wTagMode) {
+                    g_wTagMode = false;
                 }
 
                 UpdateIndicatorPosition();
@@ -2218,6 +2232,3 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     UpdateIndicatorPosition();
     return (int)msg.wParam;
 }
-
-
-
