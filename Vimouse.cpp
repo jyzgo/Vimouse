@@ -1116,7 +1116,7 @@ void CreateHintWindow() {
 
     // 创建单个窗口，初始时隐藏
     g_hintWindow = CreateWindowEx(
-        WS_EX_TOPMOST | WS_EX_LAYERED,  // 置顶且支持透明
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,  // 置顶且支持透明
         L"HintWindowClass",
         NULL,
         WS_POPUP,
@@ -1149,7 +1149,7 @@ void CreateIndicatorWindow() {
 
     // 创建指示器窗口，初始时隐藏
     g_indicatorWindow = CreateWindowEx(
-        WS_EX_TOPMOST | WS_EX_LAYERED,  // 置顶且支持透明
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,  // 置顶且支持透明
         L"IndicatorWndClass",
         NULL,
         WS_POPUP,
@@ -1558,7 +1558,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         //    (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_altPressed)
         //);
         // 检查 Ctrl+\ 切换激活状态
-        if (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_ctrlPressed && g_altPressed) {
+        if (isKeyDown && (vkCode == 'J' && g_ctrlPressed ) || (vkCode == 'K' && g_ctrlPressed && g_altPressed)) {
             g_isActive = !g_isActive;
             if (g_isActive) {
 
