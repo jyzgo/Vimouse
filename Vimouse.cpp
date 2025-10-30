@@ -40,6 +40,7 @@ bool g_iskeyDown = false;
 
 // Ctrl键状态跟踪
 bool g_ctrlPressed = false;  // 跟踪Ctrl键状态
+bool g_altPressed = false;
 bool g_winPressed = false;   // 跟踪Win键状态
 
 // 平滑移动相关变量
@@ -115,6 +116,7 @@ std::string GetConfigPath();
 void SaveTagsToConfig();
 void LoadTagsFromConfig();
 HWND CreateTagWindowNoSave(int x, int y, char letter);
+void RemoveTagWindowByLetter(char letter);
 
 // 枚举显示器回调函数
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -520,7 +522,11 @@ LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     break;
                 }
             }
-            JumpToTag(letter);
+            RemoveTagWindowByLetter(letter);
+            
+        }
+        else {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         break;
     }
@@ -658,6 +664,10 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
 // 创建Hint窗口的窗口过程
 LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (!g_isActive)
+    {
+		return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
     switch (msg) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -737,6 +747,10 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         break;
     }
     case WM_LBUTTONDOWN: {
+        if (!g_isActive)
+        {
+			return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         // 点击窗口处理
         int x = LOWORD(lParam);
         int y = HIWORD(lParam);
@@ -787,7 +801,6 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     default:
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
-    return 0;
 }
 
 // 状态指示器窗口过程
@@ -942,6 +955,22 @@ void RemoveTagWindow(int x, int y) {
     }
 }
 
+void RemoveTagWindowByLetter(char letter) {
+    for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
+        if (it->letter == letter) {
+            // 销毁窗口
+            if (it->hwnd) {
+                DestroyWindow(it->hwnd);
+            }
+            // 从列表中移除
+            g_tags.erase(it);
+            // 保存到配置文件
+            SaveTagsToConfig();
+            break;
+        }
+    }
+}
+
 // 进入tag模式
 void EnterTagMode() {
     if (g_tagMode) return;
@@ -974,6 +1003,7 @@ void ExitTagMode() {
 
 // 跳转到标签位置
 void JumpToTag(char letter) {
+    DebugLog("jump to tag %c\n", letter);
     for (const auto& tag : g_tags) {
         if (tag.letter == letter) {
             SetCursorPos(tag.pos.x, tag.pos.y);
@@ -1427,6 +1457,13 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_ctrlPressed = isKeyDown;
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
         }
+
+        if (vkCode == VK_LMENU || vkCode == VK_RMENU)
+        {
+            g_altPressed = isKeyDown;
+                return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+        }
+
         if (g_ctrlPressed && vkCode == VK_OEM_MINUS)
         {
             //不处理vs studio的状态
@@ -1447,7 +1484,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         g_dotSize = 1;
         // 检查 Ctrl+\ 切换激活状态
-        if (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_ctrlPressed) {
+        if (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_altPressed) {
             g_isActive = !g_isActive;
             if (g_isActive) {
 
@@ -1469,6 +1506,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 g_rightButtonDown = false;
                 g_wheelMode = false;  // 退出滚轮模式
                 g_gridMode = false;  // 退出grid模式
+
+                g_tagMode = false;
+                g_altPressed = false;
                 // 重置Ctrl状态
                 g_ctrlPressed = false;
                 // 重置Win状态
@@ -1490,6 +1530,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             ExitHintMode(false);  // 退出hint模式
             ExitWheelMode();  // 退出滚轮模式
             ExitGridMode();   // 退出grid模式
+            ExitTagMode();
             // 更新指示器位置
             g_leftButtonDown = true;  // 设置左键按下状态
             // 更新指示器位置（会触发重绘）
@@ -1515,6 +1556,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_isActive = false;
             ExitWheelMode();  // 退出滚轮模式
             ExitGridMode();   // 退出grid模式
+            ExitTagMode();
             // 更新指示器位置
             UpdateIndicatorPosition();
             return 1;
@@ -1524,6 +1566,22 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         // 如果不处于激活状态，直接返回
         if (!g_isActive) {
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+        }
+
+        if (g_tagMode)
+        {
+            if(isKeyDown && !g_ctrlPressed && !g_winPressed && !g_altPressed)
+            {
+                DebugLog("bbefore jum %lu\n", (DWORD)vkCode);
+                if (vkCode >= 'A' && vkCode <= 'Z')
+                {
+                    DebugLog("nothing inhere");
+                    //char letter = (char)(vkCode - 'A' + 'a');  // 转换为小写
+                    JumpToTag((char)vkCode);
+                    //ExitTagMode();
+                    return 1;
+                }
+			}
         }
 
         // 如果处于grid模式，处理特定键
@@ -1694,13 +1752,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 // 但只对C和V进行特殊处理，其他Ctrl+字母组合直接传递
                 if (g_ctrlPressed && (vkCode >= 'A' && vkCode <= 'Z')) {
                     // 特殊处理：Ctrl+C 和 Ctrl+V 需要传递给其他程序
-                    if (vkCode == 'C' || vkCode == 'V') {
-                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
-                    }
-                    // 其他Ctrl+字母组合也传递给其他程序（如Ctrl+Z, Ctrl+A等）
-                    else {
-                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
-                    }
+					return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                 }
 
                 // 滚轮模式处理：如果在滚轮模式下，HJKL用于滚轮滚动
@@ -1921,9 +1973,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 检查当前位置是否已有标签
                     bool tagExists = false;
                     for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
-                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos,it->pos) <800) {
+                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos, it->pos) < 800) {
                             // 移除现有标签
-							DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
+                            DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
                             DestroyWindow(it->hwnd);
                             g_tags.erase(it);
                             tagExists = true;
@@ -2051,6 +2103,12 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     return 1;
                     break;
                 case 'A':
+                    // 在tag模式下，处理字母键跳转到对应标签
+                    if (g_tagMode) {
+                        char letter = (char)vkCode;
+                        JumpToTag(letter);
+                        return 1;  // 阻止字母键传递给其他程序
+                    }
                     return 1;
                 case VK_LEFT:
                 case VK_UP:
@@ -2290,3 +2348,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     UpdateIndicatorPosition();
     return (int)msg.wParam;
 }
+
+
+
