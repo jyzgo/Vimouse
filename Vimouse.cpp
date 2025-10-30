@@ -111,7 +111,7 @@ HWND CreateTagWindowNoSave(int x, int y, char letter);
 void RemoveTagWindow(int x, int y);
 void EnterTagMode();
 void ExitTagMode();
-void JumpToTag(char letter);
+bool JumpToTag(char letter);
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
 int GetCurrentScreenIndex();
 void AddMousePositionToStack();
@@ -1058,14 +1058,16 @@ void ExitTagMode() {
 }
 
 // 跳转到标签位置
-void JumpToTag(char letter) {
+bool JumpToTag(char letter) {
     for (const auto& tag : g_tags) {
         if (tag.letter == letter) {
             SetCursorPos(tag.pos.x, tag.pos.y);
             ExitTagMode();
+            return true;
             break;
         }
     }
+    return false;
 }
 
 // 创建grid窗口
@@ -1668,8 +1670,12 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             {
                 if (vkCode >= 'A' && vkCode <= 'Z')
                 {
-                    JumpToTag((char)vkCode);
-                    return 1;
+                    bool jsucces = JumpToTag((char)vkCode);
+                    if (jsucces)
+                    {
+						return 1;
+                    }
+					ExitTagMode();
                 }
 			}
         }
@@ -2187,13 +2193,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     return 1;
                     break;
                 case 'A':
-                    // 在tag模式下，处理字母键跳转到对应标签
-                    if (g_tagMode) {
-                        char letter = (char)vkCode;
-                        JumpToTag(letter);
-                        return 1;  // 阻止字母键传递给其他程序
-                    }
-                    return 1;
                 case VK_LEFT:
                 case VK_UP:
                 case VK_RIGHT:
