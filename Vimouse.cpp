@@ -1091,6 +1091,14 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         if (isKeyDown && vkCode == 'J' && g_ctrlPressed) {
             g_isActive = !g_isActive;
             if (g_isActive) {
+
+                g_currentScreenIndex = GetCurrentScreenIndex();
+                const RECT& screenRect = g_screenRects[g_currentScreenIndex];
+                int centerX = screenRect.left + (screenRect.right - screenRect.left) / 2;
+                int centerY = screenRect.top + (screenRect.bottom - screenRect.top) / 2;
+
+                SetCursorPos(centerX , centerY);
+
                 GetCursorPos(&g_lastMousePos);  // 记录当前位置
                 // 重置C键状态
                 g_firstCPress = true;
