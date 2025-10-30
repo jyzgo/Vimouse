@@ -1027,7 +1027,8 @@ void RemoveTagWindowByLetter(char letter) {
 
 // 进入tag模式
 void EnterTagMode() {
-    if (g_tagMode) return;
+    //if (g_tagMode) return;
+    DebugLog("enter tag");
 
     g_tagMode = true;
     ShowTagWindowsInteractive();
@@ -1043,9 +1044,11 @@ void EnterTagMode() {
 
 // 退出tag模式
 void ExitTagMode() {
-    if (!g_tagMode) return;
+    //if (!g_tagMode) return;
 
+    //DebugLog("EXIT");
     g_tagMode = false;
+    g_wTagMode = false;
 
     // 更新所有标签窗口的透明度
     for (auto& tag : g_tags) {
@@ -1631,11 +1634,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 ExitHintMode(false);  // 退出hint模式
                 return 1;
             }
-            if (g_tagMode)
-            {
-                ExitTagMode();
-                return 1;
-            }
             if (g_gridMode)
             {
                 ExitGridMode();
@@ -1668,7 +1666,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         {
             if(isKeyDown && !g_ctrlPressed && !g_winPressed && !g_altPressed)
             {
-                if (vkCode >= 'A' && vkCode <= 'Z')
+                if (vkCode >= 'A' && vkCode <= 'Z' && vkCode != 'W' && vkCode != 'Q')
                 {
                     bool jsucces = JumpToTag((char)vkCode);
                     if (jsucces)
@@ -2096,10 +2094,17 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         // 如果W键是和Ctrl一起按下的，不执行W键功能，直接传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
+                    g_lastActionWasC = false;  // 重置C键状态
+                    if (g_wTagMode)
+                    {
+                        g_wTagMode = false;
+                        g_tagMode =false;
+                        ExitTagMode();
+                        break;
+                    }
                     // 按W键进入tag模式
                     g_wTagMode = true;
                     EnterTagMode();
-                    g_lastActionWasC = false;  // 重置C键状态
                     break;
 
                     // 鼠标点击
@@ -2232,10 +2237,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     return 1;
                 }
 
-                // 处理W键释放（如果是通过W键进入的tag模式）
-                if (vkCode == 'W' && g_wTagMode) {
-                    g_wTagMode = false;
-                }
 
                 UpdateIndicatorPosition();
                 // 处理按键释放
