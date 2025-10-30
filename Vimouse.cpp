@@ -114,6 +114,7 @@ long DistanceSquared(POINT a, POINT b);
 std::string GetConfigPath();
 void SaveTagsToConfig();
 void LoadTagsFromConfig();
+HWND CreateTagWindowNoSave(int x, int y, char letter);
 
 // 枚举显示器回调函数
 BOOL CALLBACK EnumDisplayMonitorsProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
@@ -195,13 +196,70 @@ void LoadTagsFromConfig() {
                 int x = std::stoi(xStr);
                 int y = std::stoi(yStr);
 
-                // 创建标签窗口
-                CreateTagWindow(x, y, letter);
+                // 创建标签窗口并添加到全局标签向量
+                HWND hwnd = CreateTagWindowNoSave(x, y, letter);
+
+                // 手动添加到标签列表
+                TagInfo tag;
+                tag.hwnd = hwnd;
+                tag.pos.x = x;
+                tag.pos.y = y;
+                tag.letter = letter;
+                tag.active = true;
+                g_tags.push_back(tag);
+
+                // 更新下一个字母
+                if (letter >= g_nextLetter) {
+                    g_nextLetter = (char)(letter + 1);
+                    if (g_nextLetter > 'Z') {
+                        g_nextLetter = 'A'; // 如果超过Z则回到A
+                    }
+                }
             }
         }
         file.close();
     }
 }
+
+// 创建标签窗口的辅助函数（不保存配置）
+HWND CreateTagWindowNoSave(int x, int y, char letter) {
+    // 注册tag窗口类
+    WNDCLASSEX wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEX);
+    wc.lpfnWndProc = TagWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"TagWindowClass";
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+
+    RegisterClassEx(&wc);
+
+    // 创建tag窗口
+    HWND hwnd = CreateWindowEx(
+        WS_EX_TOPMOST | WS_EX_LAYERED,  // 置顶且支持透明
+        L"TagWindowClass",
+        NULL,
+        WS_POPUP,
+        x, y, 30, 30,  // 位置和大小
+        NULL,
+        NULL,
+        GetModuleHandle(NULL),
+        NULL
+    );
+
+    if (hwnd) {
+        // 设置窗口透明度 (半透)
+        SetLayeredWindowAttributes(hwnd, 0, g_tagMode ? 255 : 150, LWA_ALPHA);
+        ShowWindow(hwnd, SW_SHOW);
+    }
+
+    return hwnd;
+}
+
+
+
+
+
 
 // 获取鼠标当前所在屏幕的索引
 int GetCurrentScreenIndex() {
@@ -1863,7 +1921,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 检查当前位置是否已有标签
                     bool tagExists = false;
                     for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
-                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos,it->pos) <500) {
+                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos,it->pos) <800) {
                             // 移除现有标签
 							DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
                             DestroyWindow(it->hwnd);
