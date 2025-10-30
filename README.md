@@ -9,7 +9,7 @@
 
 ### 快捷键说明
 
-- **启动 Normal 模式**：`Ctrl + \`
+- **启动 Normal 模式**：`Ctrl + J`
 - **退出模式**：`Esc` 或 `Enter`  
   - 使用 `Enter` 退出时，会自动点击鼠标左键，用于聚焦当前窗口
 
@@ -18,10 +18,12 @@
 -  `u`/`o`/`n`/`.`: 分别代表 ↖️↗️ ↙️ ↘️的移动方向
 - `f`：鼠标左键点击
 - `g`：鼠标右键点击
+  `r`: 返回上一个鼠标点击位置 (f)
+  `e`: 返回下一个鼠标点击位置
 - `y`：进入滚轮模式（Wheel Mode）  
   - 进入后，使用 `h`/`j`/`k`/`l` 控制页面滚动（模拟滚轮）
 - `i`：进入网格模式（Grid Mode）
-- `r`：返回上一个区块（区域）
+- `r`：返回上一个区块（网格模式）
 - `m`：进入地图模式（Map Mode）
 
 #### Grid 模式
@@ -52,7 +54,7 @@
 
 ### Key Bindings
 
-- **Enter Normal Mode**: `Ctrl + \`
+- **Enter Normal Mode**: `Ctrl + J`
 - **Exit Mode**: `Esc` or `Enter`  
   - Pressing `Enter` will also trigger a left mouse click to focus the current window
 
@@ -61,10 +63,12 @@
 - `u`/`o`/`n`/`.` : Move mouse ↖️, ↗️, ↙️,  ↘️
 - `f`: Left mouse click
 - `g`: Right mouse click
+  `r`: Return last position left mouse clicked
+  `e`: Return next position left mouse clicked
 - `y`: Enter **Wheel Mode**  
   - Use `h`/`j`/`k`/`l` to scroll the page (simulates mouse wheel)
 - `i`: Enter **Grid Mode**
-- `r`: Return to the previous screen region
+- `r`: Return to the previous screen region (Map mode)
 - `m`: Enter **Map Mode**
 
 #### Grid Mode

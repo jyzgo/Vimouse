@@ -1088,7 +1088,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         }
 
         // 检查 Ctrl+\ 切换激活状态
-        if (isKeyDown && vkCode == VK_OEM_5 && g_ctrlPressed) {
+        if (isKeyDown && vkCode == 'J' && g_ctrlPressed) {
             g_isActive = !g_isActive;
             if (g_isActive) {
                 GetCursorPos(&g_lastMousePos);  // 记录当前位置
