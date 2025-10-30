@@ -325,7 +325,7 @@ int GetCurrentScreenIndex() {
             return i;
         }
     }
-    DebugLog("find screen id %d\n");
+    //DebugLog("find screen id %d\n");
     // 如果找不到鼠标所在屏幕（理论上不应该发生），返回第一个屏幕
     return 0;
 }
@@ -1028,7 +1028,7 @@ void RemoveTagWindowByLetter(char letter) {
 // 进入tag模式
 void EnterTagMode() {
     //if (g_tagMode) return;
-    DebugLog("enter tag");
+    //DebugLog("enter tag");
 
     g_tagMode = true;
     ShowTagWindowsInteractive();
@@ -1184,7 +1184,7 @@ void EnterHintMode() {
     g_hintMode = true;
     g_currentHint = "";
     g_hintScreenIndex = GetCurrentScreenIndex();
-    DebugLog("hint index %d", g_hintScreenIndex);
+    //DebugLog("hint index %d", g_hintScreenIndex);
 
     // 检查是否有屏幕信息
     if (g_screenRects.empty()) {
@@ -2069,7 +2069,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
                         if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos, it->pos) < 600) {
                             // 移除现有标签
-                            DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
+                            //DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
                             DestroyWindow(it->hwnd);
                             g_tags.erase(it);
                             tagExists = true;
