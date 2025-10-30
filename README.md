@@ -15,9 +15,10 @@
 
 #### Normal 模式
 - `h` / `j` / `k` / `l`：鼠标向左 / 下 / 上 / 右移动
+-  `u`/`o`/`n`/`.`: 分别代表 ↖️↗️ ↙️ ↘️的移动方向
 - `f`：鼠标左键点击
 - `g`：鼠标右键点击
-- `u`：进入滚轮模式（Wheel Mode）  
+- `y`：进入滚轮模式（Wheel Mode）  
   - 进入后，使用 `h`/`j`/`k`/`l` 控制页面滚动（模拟滚轮）
 - `i`：进入网格模式（Grid Mode）
 - `r`：返回上一个区块（区域）
@@ -57,9 +58,10 @@
 
 #### Normal Mode
 - `h` / `j` / `k` / `l`: Move mouse left / down / up / right
+- `u`/`o`/`n`/`.` : Move mouse ↖️, ↗️, ↙️,  ↘️
 - `f`: Left mouse click
 - `g`: Right mouse click
-- `u`: Enter **Wheel Mode**  
+- `y`: Enter **Wheel Mode**  
   - Use `h`/`j`/`k`/`l` to scroll the page (simulates mouse wheel)
 - `i`: Enter **Grid Mode**
 - `r`: Return to the previous screen region
