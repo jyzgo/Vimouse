@@ -9,6 +9,7 @@
 #include <map>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 // 全局变量
 HHOOK g_keyboardHook = NULL;
@@ -86,6 +87,7 @@ bool g_editTagMode = false;
 int g_tagTabIndex = 1;
 
 // 函数声明
+void UpdateNextLetter();
 void StartSmoothMove();
 void StopSmoothMove();
 void EnterHintMode();
@@ -1971,6 +1973,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
                 // 非滚轮模式下的按键处理
                 //POINT currentPos;
+                if (vkCode >= VK_NUMPAD0 && vkCode <= VK_NUMPAD9)
+                {
+					return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                }
 
                 switch (vkCode) {
                 case 'H':  // 左移
@@ -2218,6 +2224,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 case VK_UP:
                 case VK_RIGHT:
                 case VK_DOWN:
+                case VK_F1:
+                case VK_F2:
                 case VK_F5:
                 case VK_F11:
                 case VK_F12:
@@ -2347,9 +2355,38 @@ void PutTag(POINT currentPos) {
         CreateTagWindow(currentPos.x, currentPos.y, g_nextLetter);
 
         // 更新下一个字母
-        g_nextLetter = (g_nextLetter - 'A' + 1) % 26 + 'A';
+        //g_nextLetter = (g_nextLetter - 'A' + 1) % 26 + 'A';
+        UpdateNextLetter();
     }
     SaveTagsToConfig();
+}
+
+void UpdateNextLetter()
+{
+    static const char AVAILABLE_LETTERS[] = {
+        'A','B','C','D','E','F','G','H','I','J','K','L','M',
+        'N','O','P','R','S','T','U','V','X','Y','Z'
+    };
+    static int lastIndex = 0; // 记住上次分配的位置
+    const int NUM_LETTERS = 24;
+
+    // 先尝试从 lastIndex 开始找空闲
+    for (int i = 0; i < NUM_LETTERS; ++i)
+    {
+        int idx = (lastIndex + i) % NUM_LETTERS;
+        char c = AVAILABLE_LETTERS[idx];
+        if (std::none_of(g_tags.begin(), g_tags.end(),
+            [c](const TagInfo& t) { return t.letter == c; }))
+        {
+            g_nextLetter = c;
+            lastIndex = (idx + 1) % NUM_LETTERS;
+            return;
+        }
+    }
+
+    // 全部已用：回到 lastIndex（或强制用第一个）
+    g_nextLetter = AVAILABLE_LETTERS[lastIndex];
+    lastIndex = (lastIndex + 1) % NUM_LETTERS;
 }
 
 bool RemoveTagBySameLetter(char letter) {
