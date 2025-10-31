@@ -82,7 +82,8 @@ struct TagInfo {
 std::vector<TagInfo> g_tags;
 char g_nextLetter = 'A';  // 下一个要使用的字母
 bool g_tagMode = false;  // 是否处于tag模式
-bool g_wTagMode = false; // 是否通过W键进入的tag模式
+bool g_editTagMode = false;
+int g_tagTabIndex = 1;
 
 // 函数声明
 void StartSmoothMove();
@@ -97,6 +98,7 @@ void MoveToGridArea(int direction);
 void MoveToGridCorner(int corner);
 void ReturnToPreviousGrid();
 bool RemoveTagBySameLetter(char letter);
+void PutTag(POINT currentPos);
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -1048,7 +1050,6 @@ void ExitTagMode() {
 
     //DebugLog("EXIT");
     g_tagMode = false;
-    g_wTagMode = false;
 
     // 更新所有标签窗口的透明度
     for (auto& tag : g_tags) {
@@ -1058,6 +1059,8 @@ void ExitTagMode() {
         }
     }
     ShowTagWindowsNonInteractive();
+    g_dotSize = 8;
+    UpdateIndicatorPosition();
 }
 
 // 跳转到标签位置
@@ -1604,6 +1607,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Ctrl+\正常工作
         }
 
+        GetCursorPos(&g_lastMousePos);  // 记录当前位置
+
         // 检查 Eenter 关闭激活状态,并且在当前区域点击一下鼠标
         if (isKeyDown && vkCode == VK_RETURN && g_isActive) {
             g_isActive = false;
@@ -1627,6 +1632,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             return 1;
 
         }
+
 
         // 检查 Esc 关闭激活状态
         if (isKeyDown && vkCode == VK_ESCAPE && g_isActive) {
@@ -1660,6 +1666,13 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         if (!g_isActive) {
             HideAllTagWindows();
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+        }
+
+        if (isKeyDown && vkCode >= '0' && vkCode <= '9' && !g_ctrlPressed && !g_winPressed)
+        {
+            DebugLog("presed %c", vkCode);
+            g_tagTabIndex = vkCode - '0';
+			return 1;
         }
 
         if (g_tagMode)
@@ -1703,6 +1716,20 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 case VK_ESCAPE:  // 退出grid模式
                     ExitGridMode();
                     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+                case 'T':
+                 
+                    // 退出Grid模式
+                    if (!g_leftButtonDown) {
+                        ExitGridMode();
+                        g_leftButtonDown = false;  // 设置左键按下状态
+                        // 更新指示器位置（会触发重绘）
+                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                        PutTag(g_lastMousePos);
+                        UpdateIndicatorPosition();
+                    }
+                    return 1;
                 case 'F':  // 左键点击
                 {
                     // 在Grid模式下执行点击后，保持当前位置并退出Grid模式
@@ -1715,6 +1742,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                         UpdateIndicatorPosition();
                     }
+                    return 1;
                 }
                 return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让F键正常工作
                 case 'G':  // 右键点击
@@ -1851,8 +1879,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
                 // 滚轮模式处理：如果在滚轮模式下，HJKL用于滚轮滚动
                 if (g_wheelMode) {
-                    POINT currentPos;
-                    GetCursorPos(&currentPos);
+                    //GetCursorPos(&currentPos);
 
                     switch (vkCode) {
                     case 'H':  // 左移 -> 水平向左滚动
@@ -1943,8 +1970,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 UpdateIndicatorPosition();
 
                 // 非滚轮模式下的按键处理
-                POINT currentPos;
-                GetCursorPos(&currentPos);
+                //POINT currentPos;
 
                 switch (vkCode) {
                 case 'H':  // 左移
@@ -2064,29 +2090,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 标签功能
                 case 'Q':
                 {
-                    // 检查当前位置是否已有标签
-                    bool tagExists = false;
-                    for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
-                        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos, it->pos) < 600) {
-                            // 移除现有标签
-                            //DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
-                            DestroyWindow(it->hwnd);
-                            g_tags.erase(it);
-                            tagExists = true;
-                            break;
-                        }
-                    }
+                    PutTag(g_lastMousePos);
 
-                    if (!tagExists) {
-					
-
-                        // 创建新标签
-                        CreateTagWindow(currentPos.x, currentPos.y, g_nextLetter);
-
-                        // 更新下一个字母
-                        g_nextLetter = (g_nextLetter - 'A' + 1) % 26 + 'A';
-                    }
-                    SaveTagsToConfig();
                     return 1;
                 }
                 case 'W':
@@ -2095,17 +2100,28 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
                     g_lastActionWasC = false;  // 重置C键状态
-                    if (g_wTagMode)
+                    if (g_tagMode)
                     {
-                        g_wTagMode = false;
                         g_tagMode =false;
                         ExitTagMode();
                         break;
                     }
                     // 按W键进入tag模式
-                    g_wTagMode = true;
                     EnterTagMode();
                     break;
+                case 'T':
+                    if (!g_leftButtonDown) {
+                        g_leftButtonDown = false;  // 设置左键按下状态
+                        // 更新指示器位置（会触发重绘）
+                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+						std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                        UpdateIndicatorPosition();
+                        AddMousePositionToStack();
+                        PutTag(g_lastMousePos);
+                        g_lastActionWasC = false;  // 重置C键状态
+                    }
+                    return 1;
 
                     // 鼠标点击
                 case 'F':  // 左键点击
@@ -2124,7 +2140,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 更新指示器位置（会触发重绘）
                     UpdateIndicatorPosition();
                     mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     g_rightButtonDown = false;  // 设置右键抬起状态
                     // 更新指示器位置（会触发重绘）
@@ -2307,6 +2323,33 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     }
 
     return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+}
+
+void PutTag(POINT currentPos) {
+
+    // 检查当前位置是否已有标签
+    bool tagExists = false;
+    for (auto it = g_tags.begin(); it != g_tags.end(); ++it) {
+        if (it->pos.x == currentPos.x && it->pos.y == currentPos.y || DistanceSquared(currentPos, it->pos) < 600) {
+            // 移除现有标签
+            //DebugLog("distance squared: %d", DistanceSquared(currentPos, it->pos));
+            DestroyWindow(it->hwnd);
+            g_tags.erase(it);
+            tagExists = true;
+            break;
+        }
+    }
+
+    if (!tagExists) {
+
+
+        // 创建新标签
+        CreateTagWindow(currentPos.x, currentPos.y, g_nextLetter);
+
+        // 更新下一个字母
+        g_nextLetter = (g_nextLetter - 'A' + 1) % 26 + 'A';
+    }
+    SaveTagsToConfig();
 }
 
 bool RemoveTagBySameLetter(char letter) {
