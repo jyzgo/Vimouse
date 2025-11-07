@@ -1524,6 +1524,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_ctrlPressed = isKeyDown;
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
         }
+        if(vkCode == VK_UP || vkCode == VK_DOWN || vkCode == VK_LEFT || vkCode == VK_RIGHT)
+        {
+            return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+		}
 
    //     if (vkCode == VK_LMENU || vkCode == VK_RMENU)
    //     {
