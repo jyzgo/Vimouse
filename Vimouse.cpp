@@ -367,8 +367,24 @@ void AddMousePositionToStack() {
 }
 
 void UpdatePosByindex() {
+    // 1. 首先检查堆栈是否为空
+    if (g_positionStack.empty()) {
+        // 堆栈为空，无法设置位置，处理错误（例如记录日志或直接返回）
+        OutputDebugString(L"Error: Position stack is empty.\n");
+        return;
+    }
 
-    POINT targetPos = g_positionStack[g_mousePosIndex];
+    // 2. 检查索引是否在合法范围内 [0, g_positionStack.size() - 1]
+    if (g_mousePosIndex < 0 || g_mousePosIndex >= g_positionStack.size()) {
+        // 索引越界，处理错误
+        OutputDebugString(L"Error: Mouse position index out of range.\n");
+        return;
+    }
+
+    // 3. 安全地获取目标位置并设置光标
+    // 使用 at() 函数可以进行运行时边界检查，更安全[9](@ref)。
+    // 当然，由于我们已经做了手动检查，使用 [] 也是安全的。
+    POINT targetPos = g_positionStack.at(g_mousePosIndex); // 或者使用 g_positionStack[g_mousePosIndex]
     SetCursorPos(targetPos.x, targetPos.y);
 }
 
