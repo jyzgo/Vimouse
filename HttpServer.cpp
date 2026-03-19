@@ -220,7 +220,7 @@ static const char* HTML_PAGE =
     "document.getElementById('rl').textContent=(rt/1000).toFixed(1)+'s';"
     "if(au&&atm){clearInterval(atm);atm=setInterval(R,rt)}SC()}"
     "function WR(){mw=document.getElementById('wr').value;document.getElementById('wl').textContent=mw;SC()}"
-    "document.querySelectorAll('input[type=range]').forEach(function(el){el.addEventListener('change',function(){this.blur()})})"
+    "document.querySelectorAll('input[type=range]').forEach(function(el){el.addEventListener('change',function(){this.blur()})});"
     "function TK(){gry=!gry;document.getElementById('bk').textContent=gry?'Gray: ON':'Gray: OFF';"
     "document.getElementById('bk').className=gry?'act':'';SC()}"
     "function R(){_BC();var s=document.getElementById('s');"
