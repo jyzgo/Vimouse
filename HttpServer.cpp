@@ -562,7 +562,7 @@ static void HttpServerThread(int port) {
                 for (size_t i = 0; i < ch.size(); i++) {
                     if (ch[i] == '%' && i + 2 < ch.size()) {
                         int val = 0;
-                        sscanf(ch.c_str() + i + 1, "%2x", &val);
+                        sscanf_s(ch.c_str() + i + 1, "%2x", &val);
                         decoded += (char)val;
                         i += 2;
                     } else if (ch[i] == '+') {
