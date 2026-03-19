@@ -1,15 +1,12 @@
-﻿#include <windows.h>
-#include <shlobj.h>  // 添加此头文件
+﻿#include "Common.h"
+#include "PipeServer.h"
+#include "UIAutomation.h"
+#include <shlobj.h>
 #include <shellapi.h>
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <vector>
-#include <string>
-#include <map>
 #include <fstream>
-#include <sstream>
-#include <algorithm>
 
 // 全局变量
 HHOOK g_keyboardHook = NULL;
@@ -72,14 +69,6 @@ const int MAX_POSITIONS = 10;  // 容器最大容量
 
 
 // 标签系统相关变量
-struct TagInfo {
-    HWND hwnd;
-    POINT pos;
-    char letter;
-    bool active; // 用于标记是否在tag模式下
-};
-
-
 std::vector<TagInfo> g_tags;
 char g_nextLetter = 'A';  // 下一个要使用的字母
 bool g_tagMode = false;  // 是否处于tag模式
@@ -2440,6 +2429,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 加载标签配置
         LoadTagsFromConfig();
 
+        // 初始化 UI Automation
+        InitUIAutomation();
+
+        // 启动 Named Pipe 服务端
+        StartPipeServer();
+
         // 设置键盘钩子
         g_keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc,
             GetModuleHandle(NULL), 0);
@@ -2450,6 +2445,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     case WM_DESTROY:
+        // 停止 Pipe 服务端
+        StopPipeServer();
+        // 清理 UI Automation
+        CleanupUIAutomation();
         // 停止平滑移动
         StopSmoothMove();
 
@@ -2486,6 +2485,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // CLI 模式检测：-c "command" 或 -f script.txt
+    if (lpCmdLine && lpCmdLine[0] != '\0') {
+        std::string args(lpCmdLine);
+
+        // 分配控制台用于 CLI 输出
+        AttachConsole(ATTACH_PARENT_PROCESS);
+        FILE* fout = nullptr;
+        FILE* ferr = nullptr;
+        freopen_s(&fout, "CONOUT$", "w", stdout);
+        freopen_s(&ferr, "CONOUT$", "w", stderr);
+
+        if (args.substr(0, 2) == "-c") {
+            std::string cmd = args.substr(2);
+            // 去掉前导空格和引号
+            size_t start = cmd.find_first_not_of(" \t\"");
+            if (start != std::string::npos) cmd = cmd.substr(start);
+            size_t end = cmd.find_last_not_of(" \t\"");
+            if (end != std::string::npos) cmd = cmd.substr(0, end + 1);
+            return RunCLIClient(cmd);
+        }
+        if (args.substr(0, 2) == "-f") {
+            std::string path = args.substr(2);
+            size_t start = path.find_first_not_of(" \t\"");
+            if (start != std::string::npos) path = path.substr(start);
+            size_t end = path.find_last_not_of(" \t\"");
+            if (end != std::string::npos) path = path.substr(0, end + 1);
+            return RunCLIScript(path);
+        }
+    }
+
     // 检查是否已经有一个实例在运行
     HANDLE hMutex = CreateMutex(NULL, TRUE, L"MouseControllerMutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
