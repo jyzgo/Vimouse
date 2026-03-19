@@ -196,6 +196,7 @@ static const char* HTML_PAGE =
     "<button onclick='DC()'>DblClick Mode</button>"
     "<button id='ba' onclick='TA()'>Auto: OFF</button>"
     "<button id='bk' onclick='TK()'>Gray: OFF</button>"
+    "<button onclick='fetch(\"/api/switch_screen\").then(function(){setTimeout(R,200)})'>Screen</button>"
     "<span style='color:#888'>Hz:</span><input id='rr' type='range' min='200' max='5000' value='2000' step='100' style='width:80px' oninput='RR()'>"
     "<span id='rl' style='color:#0f0'>2.0s</span>"
     "<span style='color:#888'>W:</span><input id='wr' type='range' min='320' max='1920' value='960' step='160' style='width:100px' oninput='WR()'>"
@@ -702,6 +703,35 @@ static void HttpServerThread(int port) {
 
             char resp[128];
             snprintf(resp, sizeof(resp), "{\"ok\":true,\"from\":[%d,%d],\"to\":[%d,%d]}", x1, y1, x2, y2);
+            SendResponse(client, 200, "application/json", resp, (int)strlen(resp));
+        }
+        else if (path == "/api/switch_screen") {
+            // 枚举所有显示器
+            struct MonEnum { std::vector<RECT> rects; };
+            MonEnum me;
+            EnumDisplayMonitors(NULL, NULL, [](HMONITOR hMon, HDC, LPRECT, LPARAM lp) -> BOOL {
+                MONITORINFO mi = { sizeof(mi) };
+                GetMonitorInfo(hMon, &mi);
+                ((MonEnum*)lp)->rects.push_back(mi.rcMonitor);
+                return TRUE;
+            }, (LPARAM)&me);
+
+            // 找当前屏幕索引
+            POINT cur;
+            GetCursorPos(&cur);
+            int idx = 0;
+            for (int i = 0; i < (int)me.rects.size(); i++) {
+                if (PtInRect(&me.rects[i], cur)) { idx = i; break; }
+            }
+            // 切到下一个屏幕
+            int next = (idx + 1) % (int)me.rects.size();
+            RECT& r = me.rects[next];
+            int cx = (r.left + r.right) / 2;
+            int cy = (r.top + r.bottom) / 2;
+            SetCursorPos(cx, cy);
+
+            char resp[128];
+            snprintf(resp, sizeof(resp), "{\"ok\":true,\"screen\":%d,\"total\":%d}", next, (int)me.rects.size());
             SendResponse(client, 200, "application/json", resp, (int)strlen(resp));
         }
         else {
