@@ -37,6 +37,7 @@ struct HttpConfig {
     bool grid = true;
     bool grayscale = false;
     bool autoRefresh = false;
+    int rate = 2000; // auto refresh interval in ms (200-5000)
 };
 static HttpConfig g_config;
 
@@ -60,6 +61,7 @@ static void LoadConfig() {
         else if (line == "gray=0") g_config.grayscale = false;
         else if (line == "auto=1") g_config.autoRefresh = true;
         else if (line == "auto=0") g_config.autoRefresh = false;
+        else if (line.substr(0, 5) == "rate=") g_config.rate = atoi(line.c_str() + 5);
     }
 }
 
@@ -69,6 +71,7 @@ static void SaveConfig() {
     f << "grid=" << (g_config.grid ? 1 : 0) << "\n";
     f << "gray=" << (g_config.grayscale ? 1 : 0) << "\n";
     f << "auto=" << (g_config.autoRefresh ? 1 : 0) << "\n";
+    f << "rate=" << g_config.rate << "\n";
 }
 
 // 发送 HTTP 响应
@@ -106,25 +109,30 @@ static const char* HTML_PAGE =
     "<button onclick='DC()'>DblClick Mode</button>"
     "<button id='ba' onclick='TA()'>Auto: OFF</button>"
     "<button id='bk' onclick='TK()'>Gray: OFF</button>"
+    "<span style='color:#888'>Hz:</span><input id='rr' type='range' min='200' max='5000' value='2000' step='100' style='width:80px' oninput='RR()'>"
+    "<span id='rl' style='color:#0f0'>2.0s</span>"
     "<span style='color:#888'>W:</span><input id='wr' type='range' min='320' max='1920' value='960' step='160' style='width:100px' oninput='WR()'>"
     "<span id='wl' style='color:#0f0'>960</span>"
     "<span id='status'></span>"
     "</div>"
     "<img id='s' src='/grid.jpg' draggable='false'/>"
     "<script>"
-    "var g=1,dbl=0,au=0,atm=0,mw=960,gry=0;"
+    "var g=1,dbl=0,au=0,atm=0,mw=960,gry=0,rt=2000;"
     "function TG(v){g=v;document.getElementById('bg').className=g?'act':'';"
     "document.getElementById('bc').className=g?'':'act';SC();R()}"
     "function DC(){dbl=!dbl;document.getElementById('status').textContent=dbl?'DblClick ON':''}"
     "function TA(){au=!au;document.getElementById('ba').textContent=au?'Auto: ON':'Auto: OFF';"
     "document.getElementById('ba').className=au?'act':'';"
-    "if(atm)clearInterval(atm);atm=au?setInterval(R,2000):0;SC()}"
+    "if(atm)clearInterval(atm);atm=au?setInterval(R,rt):0;SC()}"
+    "function RR(){rt=parseInt(document.getElementById('rr').value);"
+    "document.getElementById('rl').textContent=(rt/1000).toFixed(1)+'s';"
+    "if(au&&atm){clearInterval(atm);atm=setInterval(R,rt)}SC()}"
     "function WR(){mw=document.getElementById('wr').value;document.getElementById('wl').textContent=mw;SC()}"
     "function TK(){gry=!gry;document.getElementById('bk').textContent=gry?'Gray: ON':'Gray: OFF';"
     "document.getElementById('bk').className=gry?'act':'';SC()}"
     "function R(){var s=document.getElementById('s');"
     "s.src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()+'&w='+mw+'&gray='+(gry?1:0)}"
-    "function SC(){fetch('/api/config?w='+mw+'&grid='+(g?1:0)+'&gray='+(gry?1:0)+'&auto='+(au?1:0))}"
+    "function SC(){fetch('/api/config?w='+mw+'&grid='+(g?1:0)+'&gray='+(gry?1:0)+'&auto='+(au?1:0)+'&rate='+rt)}"
     "function S(m){document.getElementById('status').textContent=m;"
     "setTimeout(function(){document.getElementById('status').textContent=''},1500)}"
     /* click handler */
@@ -161,7 +169,8 @@ static const char* HTML_PAGE =
     "if(c.width){mw=c.width;document.getElementById('wr').value=mw;document.getElementById('wl').textContent=mw}"
     "if(c.grid!==undefined){g=c.grid?1:0;document.getElementById('bg').className=g?'act':'';document.getElementById('bc').className=g?'':'act'}"
     "if(c.gray){gry=1;document.getElementById('bk').textContent='Gray: ON';document.getElementById('bk').className='act'}"
-    "if(c.auto){au=1;document.getElementById('ba').textContent='Auto: ON';document.getElementById('ba').className='act';atm=setInterval(R,2000)}"
+    "if(c.rate){rt=c.rate;document.getElementById('rr').value=rt;document.getElementById('rl').textContent=(rt/1000).toFixed(1)+'s'}"
+    "if(c.auto){au=1;document.getElementById('ba').textContent='Auto: ON';document.getElementById('ba').className='act';atm=setInterval(R,rt)}"
     "R()}).catch(function(){R()});"
     "</" "script>"
     "</body></html>";
@@ -274,16 +283,22 @@ static void HttpServerThread(int port) {
                 g_config.grid = getParam("grid") != "0";
                 g_config.grayscale = getParam("gray") == "1";
                 g_config.autoRefresh = getParam("auto") == "1";
+                std::string rateParam = getParam("rate");
+                if (!rateParam.empty()) {
+                    int r = atoi(rateParam.c_str());
+                    if (r >= 200 && r <= 5000) g_config.rate = r;
+                }
                 SaveConfig();
             }
             // 返回当前配置
             char json[256];
             snprintf(json, sizeof(json),
-                "{\"width\":%d,\"grid\":%s,\"gray\":%s,\"auto\":%s}",
+                "{\"width\":%d,\"grid\":%s,\"gray\":%s,\"auto\":%s,\"rate\":%d}",
                 g_config.width,
                 g_config.grid ? "true" : "false",
                 g_config.grayscale ? "true" : "false",
-                g_config.autoRefresh ? "true" : "false");
+                g_config.autoRefresh ? "true" : "false",
+                g_config.rate);
             SendResponse(client, 200, "application/json", json, (int)strlen(json));
         }
         else if (path == "/api/click") {
