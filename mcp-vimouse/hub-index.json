@@ -1,0 +1,51 @@
+{
+  "unity_hub": {
+    "window_title": "Unity Hub",
+    "window_class": "Chrome_WidgetWin_1",
+    "sidebar_width_ratio": 0.27,
+    "header_height": 200,
+    "row_height": 56
+  },
+  "projects": [
+    {
+      "name": "EvonyPlus",
+      "path": "E:\\RSProject\\client\\EvonyPlus",
+      "editor_version": "2022.3.49f1",
+      "click_offset": { "x_ratio": 0.35, "y_abs_from_top": 259 },
+      "row_index": 0,
+      "last_scanned": "2026-03-19"
+    },
+    {
+      "name": "EvonyPlus (C)",
+      "path": "C:\\RSProject\\client\\EvonyPlus",
+      "editor_version": "2022.3.49f1",
+      "click_offset": { "x_ratio": 0.35, "y_abs_from_top": 315 },
+      "row_index": 1,
+      "last_scanned": "2026-03-19"
+    },
+    {
+      "name": "EvonyPlus (Fo)",
+      "path": "E:\\FoReleaseBranch\\client\\EvonyPlus",
+      "editor_version": "2022.3.49f1",
+      "click_offset": { "x_ratio": 0.35, "y_abs_from_top": 371 },
+      "row_index": 2,
+      "last_scanned": "2026-03-19"
+    },
+    {
+      "name": "TestHybird",
+      "path": "D:\\ProjectsOther\\TestHybird",
+      "editor_version": "2022.3.49f1",
+      "click_offset": { "x_ratio": 0.35, "y_abs_from_top": 427 },
+      "row_index": 3,
+      "last_scanned": "2026-03-19"
+    },
+    {
+      "name": "ZUtilTemplate",
+      "path": "D:\\ProjectsOther\\ZUtilTemplate",
+      "editor_version": "2022.3.49f1",
+      "click_offset": { "x_ratio": 0.35, "y_abs_from_top": 483 },
+      "row_index": 4,
+      "last_scanned": "2026-03-19"
+    }
+  ]
+}

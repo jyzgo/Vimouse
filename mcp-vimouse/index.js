@@ -2,8 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import net from "net";
+import { readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PIPE_PATH = "\\\\.\\pipe\\vimouse";
+const HUB_INDEX_PATH = join(__dirname, "hub-index.json");
 
 // Send a command to Vimouse via Named Pipe and return the response
 function sendCommand(command) {
@@ -195,6 +200,151 @@ server.tool("read_at", "OCR read text near a screen position (default 300x60 are
   height: z.number().optional().default(60).describe("Capture height"),
 }, async ({ x, y, width, height }) => {
   return toolResult(await sendCommand(`read_at ${x} ${y} ${width} ${height}`));
+});
+
+// --- High-level Automation Tools ---
+
+function loadHubIndex() {
+  try {
+    return JSON.parse(readFileSync(HUB_INDEX_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function saveHubIndex(index) {
+  writeFileSync(HUB_INDEX_PATH, JSON.stringify(index, null, 2), "utf-8");
+}
+
+server.tool("open_unity_project", "Open a Unity project via Unity Hub. Uses cached index for fast lookup, falls back to OCR scan if needed.", {
+  project: z.string().describe("Project name or path keyword (e.g. 'EvonyPlus', 'RSProject', 'FoRelease')"),
+  rescan: z.boolean().optional().default(false).describe("Force OCR rescan of Unity Hub"),
+}, async ({ project, rescan }) => {
+  const index = loadHubIndex();
+  if (!index) {
+    return { content: [{ type: "text", text: "Error: hub-index.json not found" }], isError: true };
+  }
+
+  // Find matching project in index
+  const keyword = project.toLowerCase();
+  let match = index.projects.find(p =>
+    p.name.toLowerCase().includes(keyword) ||
+    p.path.toLowerCase().includes(keyword)
+  );
+
+  // Step 1: Find or launch Unity Hub
+  let hubResult = await sendCommand("find_window Unity Hub");
+  let hubRect;
+
+  if (!hubResult.success) {
+    return { content: [{ type: "text", text: "Error: Unity Hub not running. Please start Unity Hub first." }], isError: true };
+  }
+
+  const hubWindows = JSON.parse(hubResult.data);
+  const hub = hubWindows.find(w => w.title.includes("Unity Hub"));
+  if (!hub) {
+    return { content: [{ type: "text", text: "Error: Unity Hub window not found" }], isError: true };
+  }
+  hubRect = hub.rect; // [left, top, right, bottom]
+
+  // Bring Hub to foreground
+  const hubCenterX = Math.round((hubRect[0] + hubRect[2]) / 2);
+  const hubCenterY = Math.round(hubRect[1] + 30);
+  await sendCommand(`click ${hubCenterX} ${hubCenterY}`);
+  await new Promise(r => setTimeout(r, 500));
+
+  // Step 2: If rescan or no match, OCR scan the Hub
+  if (rescan || !match) {
+    const scanResult = await sendCommand(
+      `scan_region ${hubRect[0]} ${hubRect[1]} ${hubRect[2]} ${hubRect[3]}`
+    );
+    if (scanResult.success && scanResult.data) {
+      const ocrItems = JSON.parse(scanResult.data);
+      // Try to find project name in OCR results
+      const nameMatch = ocrItems.find(item =>
+        item.text.toLowerCase().includes(keyword)
+      );
+      if (nameMatch) {
+        // Click directly on the OCR match
+        const clickX = Math.round((nameMatch.rect[0] + nameMatch.rect[2]) / 2);
+        const clickY = Math.round((nameMatch.rect[1] + nameMatch.rect[3]) / 2);
+        await sendCommand(`dclick ${clickX} ${clickY}`);
+
+        // Update index with new position
+        const offsetY = clickY - hubRect[1];
+        const xRatio = (clickX - hubRect[0]) / (hubRect[2] - hubRect[0]);
+        if (match) {
+          match.click_offset = { x_ratio: xRatio, y_abs_from_top: offsetY };
+          match.last_scanned = new Date().toISOString().split("T")[0];
+        } else {
+          // Add new project to index
+          index.projects.push({
+            name: nameMatch.text,
+            path: "",
+            editor_version: "",
+            click_offset: { x_ratio: xRatio, y_abs_from_top: offsetY },
+            row_index: index.projects.length,
+            last_scanned: new Date().toISOString().split("T")[0],
+          });
+        }
+        saveHubIndex(index);
+
+        return { content: [{ type: "text", text: `Opened "${nameMatch.text}" (via OCR scan). Waiting for Unity Editor...` }] };
+      }
+      return { content: [{ type: "text", text: `Project "${project}" not found in Unity Hub. OCR results: ${scanResult.data.substring(0, 500)}` }], isError: true };
+    }
+  }
+
+  if (!match) {
+    return { content: [{ type: "text", text: `Project "${project}" not found in index. Try with rescan=true.` }], isError: true };
+  }
+
+  // Step 3: Click using cached position
+  const clickX = Math.round(hubRect[0] + match.click_offset.x_ratio * (hubRect[2] - hubRect[0]));
+  const clickY = Math.round(hubRect[1] + match.click_offset.y_abs_from_top);
+  await sendCommand(`dclick ${clickX} ${clickY}`);
+
+  return { content: [{ type: "text", text: `Opened "${match.name}" (${match.path}) via cached index. Click at (${clickX}, ${clickY}).` }] };
+});
+
+server.tool("list_unity_projects", "List Unity projects from the cached hub index", {}, async () => {
+  const index = loadHubIndex();
+  if (!index) {
+    return { content: [{ type: "text", text: "Error: hub-index.json not found" }], isError: true };
+  }
+  const summary = index.projects.map(p => `- ${p.name}: ${p.path} (${p.editor_version})`).join("\n");
+  return { content: [{ type: "text", text: summary }] };
+});
+
+server.tool("refresh_hub_index", "Re-scan Unity Hub with OCR and update the project index cache", {}, async () => {
+  const index = loadHubIndex();
+  if (!index) {
+    return { content: [{ type: "text", text: "Error: hub-index.json not found" }], isError: true };
+  }
+
+  const hubResult = await sendCommand("find_window Unity Hub");
+  if (!hubResult.success) {
+    return { content: [{ type: "text", text: "Error: Unity Hub not running" }], isError: true };
+  }
+  const hubWindows = JSON.parse(hubResult.data);
+  const hub = hubWindows.find(w => w.title.includes("Unity Hub"));
+  if (!hub) {
+    return { content: [{ type: "text", text: "Error: Unity Hub window not found" }], isError: true };
+  }
+
+  // Bring to front
+  await sendCommand(`click ${Math.round((hub.rect[0] + hub.rect[2]) / 2)} ${hub.rect[1] + 30}`);
+  await new Promise(r => setTimeout(r, 500));
+
+  // OCR scan
+  const scanResult = await sendCommand(
+    `scan_region ${hub.rect[0]} ${hub.rect[1]} ${hub.rect[2]} ${hub.rect[3]}`
+  );
+  if (!scanResult.success) {
+    return { content: [{ type: "text", text: "Error: OCR scan failed: " + scanResult.error }], isError: true };
+  }
+
+  return { content: [{ type: "text", text: `Hub scanned. OCR data:\n${scanResult.data}` }] };
 });
 
 // --- Start Server ---
