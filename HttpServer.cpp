@@ -298,8 +298,11 @@ static const char* HTML_PAGE =
     "setTimeout(R,300)"
     "})})"
     "}"
+    "if(e.ctrlKey&&e.key==='s'){e.preventDefault();fetch('/api/keypress?key=ctrl_s');S('Saved');return}"
     "if(e.ctrlKey&&e.key==='a'){e.preventDefault();fetch('/api/keypress?key=ctrl_a');return}"
     "if(e.ctrlKey&&e.key==='z'){e.preventDefault();fetch('/api/keypress?key=ctrl_z');return}"
+    "if(e.ctrlKey&&e.key==='y'){e.preventDefault();fetch('/api/keypress?key=ctrl_y');return}"
+    "if(e.ctrlKey&&e.key==='f'){e.preventDefault();fetch('/api/keypress?key=ctrl_f');return}"
     "if(e.ctrlKey&&e.key==='x'){e.preventDefault();"
     "var x1=new XMLHttpRequest();x1.open('GET','/api/keypress?key=ctrl_x',false);x1.send();"
     "var x2=new XMLHttpRequest();x2.open('GET','/api/clipboard',false);x2.send();"
@@ -564,6 +567,15 @@ static void HttpServerThread(int port) {
             } else if (key == "ctrl_x") {
                 SimulateKeyCombo(VK_CONTROL, 'X');
                 Sleep(200);
+            } else if (key == "ctrl_s") {
+                SimulateKeyCombo(VK_CONTROL, 'S');
+                Sleep(50);
+            } else if (key == "ctrl_y") {
+                SimulateKeyCombo(VK_CONTROL, 'Y');
+                Sleep(50);
+            } else if (key == "ctrl_f") {
+                SimulateKeyCombo(VK_CONTROL, 'F');
+                Sleep(50);
             }
             SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
         }
