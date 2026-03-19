@@ -220,6 +220,7 @@ static const char* HTML_PAGE =
     "document.getElementById('rl').textContent=(rt/1000).toFixed(1)+'s';"
     "if(au&&atm){clearInterval(atm);atm=setInterval(R,rt)}SC()}"
     "function WR(){mw=document.getElementById('wr').value;document.getElementById('wl').textContent=mw;SC()}"
+    "document.querySelectorAll('input[type=range]').forEach(function(el){el.addEventListener('change',function(){this.blur()})})"
     "function TK(){gry=!gry;document.getElementById('bk').textContent=gry?'Gray: ON':'Gray: OFF';"
     "document.getElementById('bk').className=gry?'act':'';SC()}"
     "function R(){_BC();var s=document.getElementById('s');"
@@ -231,7 +232,7 @@ static const char* HTML_PAGE =
     "var _dr=0,_dx1=0,_dy1=0;"
     /* mousedown: record start */
     "document.getElementById('s').addEventListener('mousedown',function(e){"
-    "if(e.button!==0)return;e.preventDefault();"
+    "if(e.button!==0)return;e.preventDefault();if(document.activeElement)document.activeElement.blur();"
     "var rect=this.getBoundingClientRect();"
     "_dx1=(e.clientX-rect.left)/rect.width;_dy1=(e.clientY-rect.top)/rect.height;_dr=1"
     "});"
