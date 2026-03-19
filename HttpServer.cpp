@@ -9,6 +9,7 @@
 #include "HttpServer.h"
 #include "ScreenOCR.h"
 #include <thread>
+#include <shlobj.h>
 #include <fstream>
 #include <vector>
 #include <string>
@@ -28,6 +29,46 @@ static bool ReadFileBytes(const std::string& path, std::vector<char>& out) {
     out.resize((size_t)size);
     file.read(out.data(), size);
     return true;
+}
+
+// 配置持久化
+struct HttpConfig {
+    int width = 960;
+    bool grid = true;
+    bool grayscale = false;
+    bool autoRefresh = false;
+};
+static HttpConfig g_config;
+
+static std::string GetConfigPath() {
+    char path[MAX_PATH];
+    SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path);
+    std::string dir = std::string(path) + "\\Vimouse";
+    CreateDirectoryA(dir.c_str(), NULL);
+    return dir + "\\http_config.txt";
+}
+
+static void LoadConfig() {
+    std::ifstream f(GetConfigPath());
+    if (!f.is_open()) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.substr(0, 6) == "width=") g_config.width = atoi(line.c_str() + 6);
+        else if (line == "grid=1") g_config.grid = true;
+        else if (line == "grid=0") g_config.grid = false;
+        else if (line == "gray=1") g_config.grayscale = true;
+        else if (line == "gray=0") g_config.grayscale = false;
+        else if (line == "auto=1") g_config.autoRefresh = true;
+        else if (line == "auto=0") g_config.autoRefresh = false;
+    }
+}
+
+static void SaveConfig() {
+    std::ofstream f(GetConfigPath());
+    f << "width=" << g_config.width << "\n";
+    f << "grid=" << (g_config.grid ? 1 : 0) << "\n";
+    f << "gray=" << (g_config.grayscale ? 1 : 0) << "\n";
+    f << "auto=" << (g_config.autoRefresh ? 1 : 0) << "\n";
 }
 
 // 发送 HTTP 响应
@@ -64,22 +105,26 @@ static const char* HTML_PAGE =
     "<button onclick='R()'>Refresh (F5)</button>"
     "<button onclick='DC()'>DblClick Mode</button>"
     "<button id='ba' onclick='TA()'>Auto: OFF</button>"
+    "<button id='bk' onclick='TK()'>Gray: OFF</button>"
     "<span style='color:#888'>W:</span><input id='wr' type='range' min='320' max='1920' value='960' step='160' style='width:100px' oninput='WR()'>"
     "<span id='wl' style='color:#0f0'>960</span>"
     "<span id='status'></span>"
     "</div>"
     "<img id='s' src='/grid.jpg' draggable='false'/>"
     "<script>"
-    "var g=1,dbl=0,au=0,atm=0,mw=960;"
+    "var g=1,dbl=0,au=0,atm=0,mw=960,gry=0;"
     "function TG(v){g=v;document.getElementById('bg').className=g?'act':'';"
-    "document.getElementById('bc').className=g?'':'act';R()}"
+    "document.getElementById('bc').className=g?'':'act';SC();R()}"
     "function DC(){dbl=!dbl;document.getElementById('status').textContent=dbl?'DblClick ON':''}"
     "function TA(){au=!au;document.getElementById('ba').textContent=au?'Auto: ON':'Auto: OFF';"
     "document.getElementById('ba').className=au?'act':'';"
-    "if(atm)clearInterval(atm);atm=au?setInterval(R,2000):0}"
-    "function WR(){mw=document.getElementById('wr').value;document.getElementById('wl').textContent=mw}"
+    "if(atm)clearInterval(atm);atm=au?setInterval(R,2000):0;SC()}"
+    "function WR(){mw=document.getElementById('wr').value;document.getElementById('wl').textContent=mw;SC()}"
+    "function TK(){gry=!gry;document.getElementById('bk').textContent=gry?'Gray: ON':'Gray: OFF';"
+    "document.getElementById('bk').className=gry?'act':'';SC()}"
     "function R(){var s=document.getElementById('s');"
-    "s.src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()+'&w='+mw}"
+    "s.src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()+'&w='+mw+'&gray='+(gry?1:0)}"
+    "function SC(){fetch('/api/config?w='+mw+'&grid='+(g?1:0)+'&gray='+(gry?1:0)+'&auto='+(au?1:0))}"
     "function S(m){document.getElementById('status').textContent=m;"
     "setTimeout(function(){document.getElementById('status').textContent=''},1500)}"
     /* click handler */
@@ -111,11 +156,19 @@ static const char* HTML_PAGE =
     "document.addEventListener('keydown',function(e){"
     "if(e.key==='F5'){e.preventDefault();R()}"
     "});"
-    /* no auto refresh - manual only */
+    /* 加载保存的配置 */
+    "fetch('/api/config').then(function(r){return r.json()}).then(function(c){"
+    "if(c.width){mw=c.width;document.getElementById('wr').value=mw;document.getElementById('wl').textContent=mw}"
+    "if(c.grid!==undefined){g=c.grid?1:0;document.getElementById('bg').className=g?'act':'';document.getElementById('bc').className=g?'':'act'}"
+    "if(c.gray){gry=1;document.getElementById('bk').textContent='Gray: ON';document.getElementById('bk').className='act'}"
+    "if(c.auto){au=1;document.getElementById('ba').textContent='Auto: ON';document.getElementById('ba').className='act';atm=setInterval(R,2000)}"
+    "R()}).catch(function(){R()});"
     "</" "script>"
     "</body></html>";
 
 static void HttpServerThread(int port) {
+    LoadConfig();
+
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
@@ -197,9 +250,10 @@ static void HttpServerThread(int port) {
             if (!wParam.empty()) maxW = atoi(wParam.c_str());
             if (maxW < 160) maxW = 160;
             if (maxW > 3840) maxW = 3840;
+            bool gray = getParam("gray") == "1";
             // 质量随分辨率调整
             int q = maxW <= 480 ? 40 : (maxW <= 960 ? 55 : 65);
-            std::string result = CaptureCurrentScreen(q, grid, maxW);
+            std::string result = CaptureCurrentScreen(q, grid, maxW, gray);
             if (result.substr(0, 3) == "OK ") {
                 std::string filePath = result.substr(3);
                 std::vector<char> fileData;
@@ -211,6 +265,26 @@ static void HttpServerThread(int port) {
             } else {
                 SendResponse(client, 500, "text/plain", result.c_str(), (int)result.size());
             }
+        }
+        else if (path == "/api/config") {
+            // 有参数则保存配置
+            std::string wParam = getParam("w");
+            if (!wParam.empty()) {
+                g_config.width = atoi(wParam.c_str());
+                g_config.grid = getParam("grid") != "0";
+                g_config.grayscale = getParam("gray") == "1";
+                g_config.autoRefresh = getParam("auto") == "1";
+                SaveConfig();
+            }
+            // 返回当前配置
+            char json[256];
+            snprintf(json, sizeof(json),
+                "{\"width\":%d,\"grid\":%s,\"gray\":%s,\"auto\":%s}",
+                g_config.width,
+                g_config.grid ? "true" : "false",
+                g_config.grayscale ? "true" : "false",
+                g_config.autoRefresh ? "true" : "false");
+            SendResponse(client, 200, "application/json", json, (int)strlen(json));
         }
         else if (path == "/api/click") {
             // 参数: rx, ry (0.0-1.0 比例), action (click/rclick/dclick)

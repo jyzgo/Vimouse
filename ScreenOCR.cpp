@@ -366,7 +366,7 @@ static void DrawGrid(Gdiplus::Graphics& g, int w, int h) {
     }
 }
 
-std::string CaptureCurrentScreen(int quality, bool grid, int maxWidth) {
+std::string CaptureCurrentScreen(int quality, bool grid, int maxWidth, bool grayscale) {
     // 找鼠标所在屏幕
     POINT cursorPos;
     GetCursorPos(&cursorPos);
@@ -405,7 +405,24 @@ std::string CaptureCurrentScreen(int quality, bool grid, int maxWidth) {
     {
         Gdiplus::Graphics g(outBmp);
         g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        g.DrawImage(bmp, 0, 0, outW, outH);
+
+        if (grayscale) {
+            // 灰度颜色矩阵
+            Gdiplus::ColorMatrix grayMatrix = {
+                0.299f, 0.299f, 0.299f, 0, 0,
+                0.587f, 0.587f, 0.587f, 0, 0,
+                0.114f, 0.114f, 0.114f, 0, 0,
+                0,      0,      0,      1, 0,
+                0,      0,      0,      0, 1
+            };
+            Gdiplus::ImageAttributes attrs;
+            attrs.SetColorMatrix(&grayMatrix);
+            Gdiplus::Rect destRect(0, 0, outW, outH);
+            g.DrawImage(bmp, destRect, 0, 0, bmp->GetWidth(), bmp->GetHeight(),
+                        Gdiplus::UnitPixel, &attrs);
+        } else {
+            g.DrawImage(bmp, 0, 0, outW, outH);
+        }
 
         if (grid) {
             DrawGrid(g, outW, outH);
