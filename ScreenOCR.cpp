@@ -311,3 +311,136 @@ std::string CaptureScreenJPEG(int x1, int y1, int x2, int y2, int quality) {
 
     return "OK " + pathUtf8;
 }
+
+// 辅助：在 GDI+ Bitmap 上绘制坐标网格
+static void DrawGrid(Gdiplus::Graphics& g, int w, int h) {
+    const int COLS = 26;
+    const int ROWS = 14; // 14行足够覆盖屏幕，标签用 A-N
+    float cellW = (float)w / COLS;
+    float cellH = (float)h / ROWS;
+
+    // 半透明黑色画笔和背景刷
+    Gdiplus::Pen gridPen(Gdiplus::Color(60, 255, 255, 255), 1.0f);
+    Gdiplus::SolidBrush bgBrush(Gdiplus::Color(140, 0, 0, 0));
+    Gdiplus::SolidBrush textBrush(Gdiplus::Color(230, 0, 255, 100));
+
+    Gdiplus::FontFamily fontFamily(L"Consolas");
+    float fontSize = cellH * 0.35f;
+    if (fontSize < 8) fontSize = 8;
+    if (fontSize > 16) fontSize = 16;
+    Gdiplus::Font font(&fontFamily, fontSize, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+
+    Gdiplus::StringFormat sf;
+    sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+    sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+
+    // 画网格线
+    for (int c = 1; c < COLS; c++) {
+        g.DrawLine(&gridPen, c * cellW, 0.0f, c * cellW, (float)h);
+    }
+    for (int r = 1; r < ROWS; r++) {
+        g.DrawLine(&gridPen, 0.0f, r * cellH, (float)w, r * cellH);
+    }
+
+    // 画标签 (列字母 + 行字母, 如 "AE" = 第1列第5行)
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            wchar_t label[3];
+            label[0] = L'A' + c;
+            label[1] = L'A' + r;
+            label[2] = L'\0';
+
+            float cx = c * cellW + cellW * 0.5f;
+            float cy = r * cellH + cellH * 0.5f;
+
+            // 背景框
+            float tw = fontSize * 1.6f;
+            float th = fontSize * 1.2f;
+            Gdiplus::RectF bgRect(cx - tw / 2, cy - th / 2, tw, th);
+            g.FillRectangle(&bgBrush, bgRect);
+
+            // 文字
+            Gdiplus::PointF pt(cx, cy);
+            g.DrawString(label, -1, &font, pt, &sf, &textBrush);
+        }
+    }
+}
+
+std::string CaptureCurrentScreen(int quality, bool grid) {
+    // 找鼠标所在屏幕
+    POINT cursorPos;
+    GetCursorPos(&cursorPos);
+    HMONITOR hMon = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfo(hMon, &mi);
+
+    int x1 = mi.rcMonitor.left;
+    int y1 = mi.rcMonitor.top;
+    int w = mi.rcMonitor.right - mi.rcMonitor.left;
+    int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+
+    // GDI+
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
+    // 截屏
+    HDC hScreenDC = GetDC(NULL);
+    HDC hMemDC = CreateCompatibleDC(hScreenDC);
+    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, w, h);
+    HGDIOBJ oldBitmap = SelectObject(hMemDC, hBitmap);
+    BitBlt(hMemDC, 0, 0, w, h, hScreenDC, x1, y1, SRCCOPY);
+    SelectObject(hMemDC, oldBitmap);
+
+    Gdiplus::Bitmap* bmp = Gdiplus::Bitmap::FromHBITMAP(hBitmap, NULL);
+
+    // 缩放到 1920 宽
+    int outW = w, outH = h;
+    if (outW > 1920) {
+        outH = outH * 1920 / outW;
+        outW = 1920;
+    }
+
+    Gdiplus::Bitmap* outBmp = new Gdiplus::Bitmap(outW, outH, PixelFormat24bppRGB);
+    {
+        Gdiplus::Graphics g(outBmp);
+        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        g.DrawImage(bmp, 0, 0, outW, outH);
+
+        if (grid) {
+            DrawGrid(g, outW, outH);
+        }
+    }
+
+    // 保存
+    wchar_t tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    std::wstring jpegPath = std::wstring(tempPath) + L"vimouse_screenshot.jpg";
+
+    CLSID jpegClsid;
+    GetEncoderClsid(L"image/jpeg", &jpegClsid);
+
+    Gdiplus::EncoderParameters encoderParams;
+    encoderParams.Count = 1;
+    encoderParams.Parameter[0].Guid = Gdiplus::EncoderQuality;
+    encoderParams.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+    encoderParams.Parameter[0].NumberOfValues = 1;
+    ULONG qualityValue = quality;
+    encoderParams.Parameter[0].Value = &qualityValue;
+
+    Gdiplus::Status status = outBmp->Save(jpegPath.c_str(), &jpegClsid, &encoderParams);
+
+    delete bmp;
+    delete outBmp;
+    DeleteObject(hBitmap);
+    DeleteDC(hMemDC);
+    ReleaseDC(NULL, hScreenDC);
+    Gdiplus::GdiplusShutdown(gdiplusToken);
+
+    if (status != Gdiplus::Ok) return "ERR failed to save JPEG";
+
+    int pathLen = WideCharToMultiByte(CP_UTF8, 0, jpegPath.c_str(), -1, NULL, 0, NULL, NULL);
+    std::string pathUtf8(pathLen - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, jpegPath.c_str(), -1, &pathUtf8[0], pathLen, NULL, NULL);
+    return "OK " + pathUtf8;
+}

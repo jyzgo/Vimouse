@@ -48,24 +48,28 @@ static void SendResponse(SOCKET client, int statusCode, const char* contentType,
     }
 }
 
-static const char* HTML_PAGE = R"(<!DOCTYPE html>
-<html>
-<head>
-<title>Vimouse Screenshot</title>
-<style>
-  body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
-  img { max-width:100vw; max-height:100vh; object-fit:contain; }
-</style>
-</head>
-<body>
-<img id="s" src="/screenshot.jpg" />
-<script>
-setInterval(()=>{
-  document.getElementById('s').src='/screenshot.jpg?t='+Date.now();
-}, 2000);
-</script>
-</body>
-</html>)";
+static const char* HTML_PAGE =
+    "<!DOCTYPE html><html><head><title>Vimouse</title>"
+    "<style>"
+    "body{margin:0;background:#111;display:flex;flex-direction:column;align-items:center;height:100vh}"
+    "img{max-width:100vw;max-height:calc(100vh - 40px);object-fit:contain}"
+    ".bar{height:36px;display:flex;align-items:center;gap:12px;color:#aaa;font:14px monospace;padding:2px 10px}"
+    "button{background:#333;color:#0f0;border:1px solid #555;padding:4px 14px;cursor:pointer;font:14px monospace}"
+    "button:hover{background:#444}.active{background:#060;border-color:#0f0}"
+    "</style></head><body>"
+    "<div class='bar'>"
+    "<button id='bg' class='active' onclick='T(1)'>Grid</button>"
+    "<button id='bc' onclick='T(0)'>Clean</button>"
+    "</div>"
+    "<img id='s' src='/grid.jpg'/>"
+    "<script>"
+    "var g=1;"
+    "function T(v){g=v;document.getElementById('bg').className=g?'active':'';"
+    "document.getElementById('bc').className=g?'':'active';R()}"
+    "function R(){document.getElementById('s').src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()}"
+    "setInterval(R,2000);"
+    "</" "script>"
+    "</body></html>";
 
 static void HttpServerThread(int port) {
     WSADATA wsaData;
@@ -128,11 +132,9 @@ static void HttpServerThread(int port) {
         size_t qpos = path.find('?');
         if (qpos != std::string::npos) path = path.substr(0, qpos);
 
-        if (path == "/screenshot.jpg") {
-            // 截取全屏
-            int sw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-            int sh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-            std::string result = CaptureScreenJPEG(0, 0, sw, sh, 60);
+        if (path == "/screenshot.jpg" || path == "/grid.jpg") {
+            bool grid = (path == "/grid.jpg");
+            std::string result = CaptureCurrentScreen(60, grid);
 
             if (result.substr(0, 3) == "OK ") {
                 std::string filePath = result.substr(3);
