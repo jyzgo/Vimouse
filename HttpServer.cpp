@@ -262,10 +262,11 @@ static const char* HTML_PAGE =
     "if(e.key==='F5'){e.preventDefault();R()}"
     "if(e.ctrlKey&&e.key==='c'){"
     "e.preventDefault();"
-    "var xhr=new XMLHttpRequest();"
-    "xhr.open('GET','/api/clipboard',false);"
-    "try{xhr.send()}catch(ex){S('XHR failed');return}"
-    "var d;try{d=JSON.parse(xhr.responseText)}catch(ex){S('Parse failed: '+xhr.responseText.substring(0,50));return}"
+    "var x1=new XMLHttpRequest();"
+    "x1.open('GET','/api/keypress?key=ctrl_c',false);x1.send();"
+    "var x2=new XMLHttpRequest();"
+    "x2.open('GET','/api/clipboard',false);x2.send();"
+    "var d;try{d=JSON.parse(x2.responseText)}catch(ex){S('Parse failed');return}"
     "if(!d.text){S('Empty clipboard');return}"
     "var ta=document.createElement('textarea');ta.value=d.text;"
     "ta.setAttribute('style','position:fixed;top:0;left:0;width:100px;height:100px;opacity:0.01;user-select:text;-webkit-user-select:text');"
@@ -518,12 +519,14 @@ static void HttpServerThread(int port) {
             std::string key = getParam("key");
             if (key == "ctrl_v") {
                 SimulateKeyCombo(VK_CONTROL, 'V');
+                Sleep(50);
             } else if (key == "ctrl_c") {
                 SimulateKeyCombo(VK_CONTROL, 'C');
+                Sleep(200); // 等待应用写入剪贴板
             } else if (key == "ctrl_a") {
                 SimulateKeyCombo(VK_CONTROL, 'A');
+                Sleep(50);
             }
-            Sleep(50);
             SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
         }
         else if (path == "/api/drag") {
