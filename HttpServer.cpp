@@ -299,6 +299,7 @@ static const char* HTML_PAGE =
     "document.execCommand('copy');document.body.removeChild(ta);"
     "S('Cut: '+d.text.substring(0,40))}return}"
     "if(e.ctrlKey||e.altKey||e.metaKey)return;"
+    "if(e.target.tagName==='INPUT')return;"
     "if(_KS[e.key]){e.preventDefault();fetch('/api/type?special='+_KS[e.key]);return}"
     "if(e.key.length===1){e.preventDefault();fetch('/api/type?char='+encodeURIComponent(e.key))}"
     "});"
