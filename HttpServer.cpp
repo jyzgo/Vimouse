@@ -312,9 +312,9 @@ static const char* HTML_PAGE =
     "if(e.target.tagName==='INPUT')return;"
     "if(_KS[e.key]){e.preventDefault();fetch('/api/type?special='+_KS[e.key]);"
     "if(e.key==='Backspace')_BB('\\b');else if(e.key==='Enter')_BB('\\n');else S('key: '+e.key);"
-    "if(_ktm)clearTimeout(_ktm);_ktm=setTimeout(function(){_ktm=0;R()},2000);return}"
+    "if(_ktm)clearTimeout(_ktm);_ktm=setTimeout(function(){_ktm=0;R()},rt);return}"
     "if(e.key.length===1){e.preventDefault();fetch('/api/type?char='+encodeURIComponent(e.key));"
-    "_BB(e.key);if(_ktm)clearTimeout(_ktm);_ktm=setTimeout(function(){_ktm=0;R()},2000)}"
+    "_BB(e.key);if(_ktm)clearTimeout(_ktm);_ktm=setTimeout(function(){_ktm=0;R()},rt)}"
     "});"
     /* 加载保存的配置 */
     "fetch('/api/config').then(function(r){return r.json()}).then(function(c){"
