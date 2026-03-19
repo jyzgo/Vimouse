@@ -49,25 +49,62 @@ static void SendResponse(SOCKET client, int statusCode, const char* contentType,
 }
 
 static const char* HTML_PAGE =
-    "<!DOCTYPE html><html><head><title>Vimouse</title>"
+    "<!DOCTYPE html><html><head><title>Vimouse Remote</title>"
     "<style>"
-    "body{margin:0;background:#111;display:flex;flex-direction:column;align-items:center;height:100vh}"
-    "img{max-width:100vw;max-height:calc(100vh - 40px);object-fit:contain}"
-    ".bar{height:36px;display:flex;align-items:center;gap:12px;color:#aaa;font:14px monospace;padding:2px 10px}"
-    "button{background:#333;color:#0f0;border:1px solid #555;padding:4px 14px;cursor:pointer;font:14px monospace}"
-    "button:hover{background:#444}.active{background:#060;border-color:#0f0}"
+    "body{margin:0;background:#111;display:flex;flex-direction:column;align-items:center;height:100vh;overflow:hidden;user-select:none}"
+    "img{max-width:100vw;max-height:calc(100vh - 40px);object-fit:contain;cursor:crosshair}"
+    ".bar{height:36px;display:flex;align-items:center;gap:10px;color:#aaa;font:13px monospace;padding:2px 10px;width:100%;box-sizing:border-box}"
+    "button{background:#333;color:#0f0;border:1px solid #555;padding:3px 12px;cursor:pointer;font:13px monospace;border-radius:3px}"
+    "button:hover{background:#444}.act{background:#060;border-color:#0f0}"
+    "#status{color:#ff0;margin-left:auto}"
     "</style></head><body>"
     "<div class='bar'>"
-    "<button id='bg' class='active' onclick='T(1)'>Grid</button>"
-    "<button id='bc' onclick='T(0)'>Clean</button>"
+    "<button id='bg' class='act' onclick='TG(1)'>Grid</button>"
+    "<button id='bc' onclick='TG(0)'>Clean</button>"
+    "<button onclick='R()'>Refresh (F5)</button>"
+    "<button onclick='DC()'>DblClick Mode</button>"
+    "<span id='status'></span>"
     "</div>"
-    "<img id='s' src='/grid.jpg'/>"
+    "<img id='s' src='/grid.jpg' draggable='false'/>"
     "<script>"
-    "var g=1;"
-    "function T(v){g=v;document.getElementById('bg').className=g?'active':'';"
-    "document.getElementById('bc').className=g?'':'active';R()}"
-    "function R(){document.getElementById('s').src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()}"
-    "setInterval(R,2000);"
+    "var g=1,dbl=0,sw=0,sh=0;"
+    "function TG(v){g=v;document.getElementById('bg').className=g?'act':'';"
+    "document.getElementById('bc').className=g?'':'act';R()}"
+    "function DC(){dbl=!dbl;document.getElementById('status').textContent=dbl?'DblClick ON':''}"
+    "function R(){var s=document.getElementById('s');"
+    "s.src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()}"
+    "function S(m){document.getElementById('status').textContent=m;"
+    "setTimeout(function(){document.getElementById('status').textContent=''},1500)}"
+    /* click handler */
+    "document.getElementById('s').addEventListener('click',function(e){"
+    "var img=this,rect=img.getBoundingClientRect();"
+    "var rx=(e.clientX-rect.left)/rect.width,ry=(e.clientY-rect.top)/rect.height;"
+    "if(rx<0||rx>1||ry<0||ry>1)return;"
+    "var act=dbl?'dclick':'click';"
+    "S(act+' at '+Math.round(rx*100)+'%,'+Math.round(ry*100)+'%');"
+    "fetch('/api/click?rx='+rx+'&ry='+ry+'&action='+act).then(function(){setTimeout(R,300)})"
+    "});"
+    /* right click */
+    "document.getElementById('s').addEventListener('contextmenu',function(e){"
+    "e.preventDefault();"
+    "var img=this,rect=img.getBoundingClientRect();"
+    "var rx=(e.clientX-rect.left)/rect.width,ry=(e.clientY-rect.top)/rect.height;"
+    "if(rx<0||rx>1||ry<0||ry>1)return;"
+    "S('rclick at '+Math.round(rx*100)+'%,'+Math.round(ry*100)+'%');"
+    "fetch('/api/click?rx='+rx+'&ry='+ry+'&action=rclick').then(function(){setTimeout(R,300)})"
+    "});"
+    /* scroll handler */
+    "document.getElementById('s').addEventListener('wheel',function(e){"
+    "e.preventDefault();"
+    "var dir=e.deltaY>0?'down':'up',amt=Math.min(Math.abs(Math.round(e.deltaY/120)),10)||1;"
+    "fetch('/api/scroll?dir='+dir+'&amt='+amt);"
+    "setTimeout(R,400)"
+    "},{passive:false});"
+    /* F5 key */
+    "document.addEventListener('keydown',function(e){"
+    "if(e.key==='F5'){e.preventDefault();R()}"
+    "});"
+    /* no auto refresh - manual only */
     "</" "script>"
     "</body></html>";
 
@@ -128,14 +165,27 @@ static void HttpServerThread(int port) {
             }
         }
 
-        // 去掉查询字符串
+        // 分离路径和查询字符串
+        std::string queryStr;
         size_t qpos = path.find('?');
-        if (qpos != std::string::npos) path = path.substr(0, qpos);
+        if (qpos != std::string::npos) {
+            queryStr = path.substr(qpos + 1);
+            path = path.substr(0, qpos);
+        }
+
+        // 辅助：从查询字符串解析参数
+        auto getParam = [&](const std::string& key) -> std::string {
+            std::string search = key + "=";
+            size_t pos = queryStr.find(search);
+            if (pos == std::string::npos) return "";
+            size_t start = pos + search.size();
+            size_t end = queryStr.find('&', start);
+            return (end == std::string::npos) ? queryStr.substr(start) : queryStr.substr(start, end - start);
+        };
 
         if (path == "/screenshot.jpg" || path == "/grid.jpg") {
             bool grid = (path == "/grid.jpg");
             std::string result = CaptureCurrentScreen(60, grid);
-
             if (result.substr(0, 3) == "OK ") {
                 std::string filePath = result.substr(3);
                 std::vector<char> fileData;
@@ -147,7 +197,66 @@ static void HttpServerThread(int port) {
             } else {
                 SendResponse(client, 500, "text/plain", result.c_str(), (int)result.size());
             }
-        } else {
+        }
+        else if (path == "/api/click") {
+            // 参数: rx, ry (0.0-1.0 比例), action (click/rclick/dclick)
+            double rx = atof(getParam("rx").c_str());
+            double ry = atof(getParam("ry").c_str());
+            std::string action = getParam("action");
+            if (action.empty()) action = "click";
+
+            // 获取鼠标所在屏幕
+            POINT cursorPos;
+            GetCursorPos(&cursorPos);
+            HMONITOR hMon = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTOPRIMARY);
+            MONITORINFO mi = { sizeof(mi) };
+            GetMonitorInfo(hMon, &mi);
+
+            int screenW = mi.rcMonitor.right - mi.rcMonitor.left;
+            int screenH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+            int x = mi.rcMonitor.left + (int)(rx * screenW);
+            int y = mi.rcMonitor.top + (int)(ry * screenH);
+
+            SetCursorPos(x, y);
+            Sleep(15);
+
+            if (action == "rclick") {
+                mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                Sleep(30);
+                mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+            } else if (action == "dclick") {
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                Sleep(30);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                Sleep(50);
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                Sleep(30);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            } else {
+                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                Sleep(30);
+                mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            }
+
+            char resp[128];
+            snprintf(resp, sizeof(resp), "{\"ok\":true,\"x\":%d,\"y\":%d}", x, y);
+            SendResponse(client, 200, "application/json", resp, (int)strlen(resp));
+        }
+        else if (path == "/api/scroll") {
+            std::string dir = getParam("dir");
+            int amt = atoi(getParam("amt").c_str());
+            if (amt < 1) amt = 1;
+            int delta = amt * 120;
+
+            if (dir == "up") {
+                mouse_event(MOUSEEVENTF_WHEEL, 0, 0, delta, 0);
+            } else if (dir == "down") {
+                mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (DWORD)(-delta), 0);
+            }
+
+            SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
+        }
+        else {
             // 返回 HTML 页面
             SendResponse(client, 200, "text/html; charset=utf-8",
                          HTML_PAGE, (int)strlen(HTML_PAGE));
