@@ -20,6 +20,89 @@ static std::thread* g_httpThread = nullptr;
 static bool g_httpRunning = false;
 static SOCKET g_listenSocket = INVALID_SOCKET;
 
+// JSON 转义
+static std::string JsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if ((unsigned char)c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)c);
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
+// 剪贴板操作
+static std::string GetClipboardText() {
+    if (!OpenClipboard(NULL)) return "";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData) { CloseClipboard(); return ""; }
+    wchar_t* pszText = (wchar_t*)GlobalLock(hData);
+    if (!pszText) { CloseClipboard(); return ""; }
+    int len = WideCharToMultiByte(CP_UTF8, 0, pszText, -1, NULL, 0, NULL, NULL);
+    std::string result(len - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, pszText, -1, &result[0], len, NULL, NULL);
+    GlobalUnlock(hData);
+    CloseClipboard();
+    return result;
+}
+
+static bool SetClipboardText(const std::string& utf8Text) {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8Text.c_str(), -1, NULL, 0);
+    if (wlen <= 0) return false;
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
+    if (!hMem) return false;
+    wchar_t* pMem = (wchar_t*)GlobalLock(hMem);
+    MultiByteToWideChar(CP_UTF8, 0, utf8Text.c_str(), -1, pMem, wlen);
+    GlobalUnlock(hMem);
+    if (!OpenClipboard(NULL)) { GlobalFree(hMem); return false; }
+    EmptyClipboard();
+    SetClipboardData(CF_UNICODETEXT, hMem);
+    CloseClipboard();
+    return true;
+}
+
+// 模拟按键组合
+static void SimulateKeyCombo(WORD vk1, WORD vk2) {
+    INPUT inputs[4] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = vk1;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = vk2;
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = vk2;
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = vk1;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(4, inputs, sizeof(INPUT));
+}
+
+// 屏幕坐标转换辅助
+static void GetScreenCoords(double rx, double ry, int& x, int& y) {
+    POINT cursorPos;
+    GetCursorPos(&cursorPos);
+    HMONITOR hMon = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfo(hMon, &mi);
+    int screenW = mi.rcMonitor.right - mi.rcMonitor.left;
+    int screenH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    x = mi.rcMonitor.left + (int)(rx * screenW);
+    y = mi.rcMonitor.top + (int)(ry * screenH);
+}
+
 // 读取文件到 vector
 static bool ReadFileBytes(const std::string& path, std::vector<char>& out) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -135,19 +218,33 @@ static const char* HTML_PAGE =
     "function SC(){fetch('/api/config?w='+mw+'&grid='+(g?1:0)+'&gray='+(gry?1:0)+'&auto='+(au?1:0)+'&rate='+rt)}"
     "function S(m){document.getElementById('status').textContent=m;"
     "setTimeout(function(){document.getElementById('status').textContent=''},1500)}"
-    /* click handler */
-    "document.getElementById('s').addEventListener('click',function(e){"
-    "var img=this,rect=img.getBoundingClientRect();"
-    "var rx=(e.clientX-rect.left)/rect.width,ry=(e.clientY-rect.top)/rect.height;"
-    "if(rx<0||rx>1||ry<0||ry>1)return;"
+    /* drag state */
+    "var _dr=0,_dx1=0,_dy1=0;"
+    /* mousedown: record start */
+    "document.getElementById('s').addEventListener('mousedown',function(e){"
+    "if(e.button!==0)return;e.preventDefault();"
+    "var rect=this.getBoundingClientRect();"
+    "_dx1=(e.clientX-rect.left)/rect.width;_dy1=(e.clientY-rect.top)/rect.height;_dr=1"
+    "});"
+    /* mouseup: click or drag */
+    "document.getElementById('s').addEventListener('mouseup',function(e){"
+    "if(e.button!==0||!_dr)return;_dr=0;"
+    "var rect=this.getBoundingClientRect();"
+    "var dx2=(e.clientX-rect.left)/rect.width,dy2=(e.clientY-rect.top)/rect.height;"
+    "var dist=Math.sqrt((_dx1-dx2)*(_dx1-dx2)+(_dy1-dy2)*(_dy1-dy2));"
+    "if(dist<0.01){"
     "var act=dbl?'dclick':'click';"
-    "S(act+' at '+Math.round(rx*100)+'%,'+Math.round(ry*100)+'%');"
-    "fetch('/api/click?rx='+rx+'&ry='+ry+'&action='+act).then(function(){setTimeout(R,300)})"
+    "S(act+' at '+Math.round(dx2*100)+'%,'+Math.round(dy2*100)+'%');"
+    "fetch('/api/click?rx='+dx2+'&ry='+dy2+'&action='+act).then(function(){setTimeout(R,300)})"
+    "}else{"
+    "S('drag '+Math.round(_dx1*100)+'%,'+Math.round(_dy1*100)+'%->'+Math.round(dx2*100)+'%,'+Math.round(dy2*100)+'%');"
+    "fetch('/api/drag?rx1='+_dx1+'&ry1='+_dy1+'&rx2='+dx2+'&ry2='+dy2).then(function(){setTimeout(R,500)})"
+    "}"
     "});"
     /* right click */
     "document.getElementById('s').addEventListener('contextmenu',function(e){"
     "e.preventDefault();"
-    "var img=this,rect=img.getBoundingClientRect();"
+    "var rect=this.getBoundingClientRect();"
     "var rx=(e.clientX-rect.left)/rect.width,ry=(e.clientY-rect.top)/rect.height;"
     "if(rx<0||rx>1||ry<0||ry>1)return;"
     "S('rclick at '+Math.round(rx*100)+'%,'+Math.round(ry*100)+'%');"
@@ -160,9 +257,26 @@ static const char* HTML_PAGE =
     "fetch('/api/scroll?dir='+dir+'&amt='+amt);"
     "setTimeout(R,400)"
     "},{passive:false});"
-    /* F5 key */
+    /* keyboard: F5, Ctrl+C, Ctrl+V */
     "document.addEventListener('keydown',function(e){"
     "if(e.key==='F5'){e.preventDefault();R()}"
+    "if(e.ctrlKey&&e.key==='c'){"
+    "e.preventDefault();"
+    "fetch('/api/clipboard').then(function(r){return r.json()}).then(function(d){"
+    "if(d.text!==undefined)navigator.clipboard.writeText(d.text).then(function(){"
+    "S('Copied: '+d.text.substring(0,40)+(d.text.length>40?'...':''))"
+    "})})"
+    "}"
+    "if(e.ctrlKey&&e.key==='v'){"
+    "e.preventDefault();"
+    "navigator.clipboard.readText().then(function(t){"
+    "fetch('/api/clipboard',{method:'POST',body:t}).then(function(){"
+    "return fetch('/api/keypress?key=ctrl_v')"
+    "}).then(function(){"
+    "S('Pasted: '+t.substring(0,40)+(t.length>40?'...':''));"
+    "setTimeout(R,300)"
+    "})})"
+    "}"
     "});"
     /* 加载保存的配置 */
     "fetch('/api/config').then(function(r){return r.json()}).then(function(c){"
@@ -220,17 +334,48 @@ static void HttpServerThread(int port) {
         if (client == INVALID_SOCKET) continue;
 
         // 读取请求
-        char reqBuf[2048] = {};
-        recv(client, reqBuf, sizeof(reqBuf) - 1, 0);
+        char reqBuf[65536] = {};
+        int totalRecv = 0;
+        // 循环读取直到拿到完整请求
+        while (totalRecv < (int)sizeof(reqBuf) - 1) {
+            int n = recv(client, reqBuf + totalRecv, sizeof(reqBuf) - 1 - totalRecv, 0);
+            if (n <= 0) break;
+            totalRecv += n;
+            // 检查是否读完（GET 请求或 POST body 已读完）
+            std::string partial(reqBuf, totalRecv);
+            size_t headerEnd = partial.find("\r\n\r\n");
+            if (headerEnd != std::string::npos) {
+                // 查找 Content-Length
+                size_t clPos = partial.find("Content-Length: ");
+                if (clPos == std::string::npos) break; // GET 请求，无 body
+                int contentLen = atoi(partial.c_str() + clPos + 16);
+                int bodyReceived = totalRecv - (int)headerEnd - 4;
+                if (bodyReceived >= contentLen) break; // POST body 读完
+            }
+        }
+        reqBuf[totalRecv] = '\0';
 
-        std::string request(reqBuf);
+        std::string request(reqBuf, totalRecv);
         std::string path = "/";
+        std::string method = "GET";
+        std::string postBody;
 
-        // 解析 GET 路径
+        // 解析请求方法和路径
         if (request.substr(0, 4) == "GET ") {
             size_t end = request.find(' ', 4);
             if (end != std::string::npos) {
                 path = request.substr(4, end - 4);
+            }
+        } else if (request.substr(0, 5) == "POST ") {
+            method = "POST";
+            size_t end = request.find(' ', 5);
+            if (end != std::string::npos) {
+                path = request.substr(5, end - 5);
+            }
+            // 提取 POST body
+            size_t bodyStart = request.find("\r\n\r\n");
+            if (bodyStart != std::string::npos) {
+                postBody = request.substr(bodyStart + 4);
             }
         }
 
@@ -302,24 +447,13 @@ static void HttpServerThread(int port) {
             SendResponse(client, 200, "application/json", json, (int)strlen(json));
         }
         else if (path == "/api/click") {
-            // 参数: rx, ry (0.0-1.0 比例), action (click/rclick/dclick)
             double rx = atof(getParam("rx").c_str());
             double ry = atof(getParam("ry").c_str());
             std::string action = getParam("action");
             if (action.empty()) action = "click";
 
-            // 获取鼠标所在屏幕
-            POINT cursorPos;
-            GetCursorPos(&cursorPos);
-            HMONITOR hMon = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTOPRIMARY);
-            MONITORINFO mi = { sizeof(mi) };
-            GetMonitorInfo(hMon, &mi);
-
-            int screenW = mi.rcMonitor.right - mi.rcMonitor.left;
-            int screenH = mi.rcMonitor.bottom - mi.rcMonitor.top;
-            int x = mi.rcMonitor.left + (int)(rx * screenW);
-            int y = mi.rcMonitor.top + (int)(ry * screenH);
-
+            int x, y;
+            GetScreenCoords(rx, ry, x, y);
             SetCursorPos(x, y);
             Sleep(15);
 
@@ -358,6 +492,63 @@ static void HttpServerThread(int port) {
             }
 
             SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
+        }
+        else if (path == "/api/clipboard") {
+            if (method == "POST") {
+                // 写入远程剪贴板
+                bool ok = SetClipboardText(postBody);
+                char resp[64];
+                snprintf(resp, sizeof(resp), "{\"ok\":%s}", ok ? "true" : "false");
+                SendResponse(client, 200, "application/json", resp, (int)strlen(resp));
+            } else {
+                // 读取远程剪贴板
+                std::string text = GetClipboardText();
+                std::string escaped = JsonEscape(text);
+                std::string resp = "{\"text\":\"" + escaped + "\"}";
+                SendResponse(client, 200, "application/json", resp.c_str(), (int)resp.size());
+            }
+        }
+        else if (path == "/api/keypress") {
+            std::string key = getParam("key");
+            if (key == "ctrl_v") {
+                SimulateKeyCombo(VK_CONTROL, 'V');
+            } else if (key == "ctrl_c") {
+                SimulateKeyCombo(VK_CONTROL, 'C');
+            } else if (key == "ctrl_a") {
+                SimulateKeyCombo(VK_CONTROL, 'A');
+            }
+            Sleep(50);
+            SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
+        }
+        else if (path == "/api/drag") {
+            double rx1 = atof(getParam("rx1").c_str());
+            double ry1 = atof(getParam("ry1").c_str());
+            double rx2 = atof(getParam("rx2").c_str());
+            double ry2 = atof(getParam("ry2").c_str());
+
+            int x1, y1, x2, y2;
+            GetScreenCoords(rx1, ry1, x1, y1);
+            GetScreenCoords(rx2, ry2, x2, y2);
+
+            // 移到起点，按下，滑到终点，松开
+            SetCursorPos(x1, y1);
+            Sleep(30);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            Sleep(30);
+            // 分步移动，模拟真实拖拽
+            int steps = 10;
+            for (int i = 1; i <= steps; i++) {
+                int cx = x1 + (x2 - x1) * i / steps;
+                int cy = y1 + (y2 - y1) * i / steps;
+                SetCursorPos(cx, cy);
+                Sleep(10);
+            }
+            Sleep(30);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+
+            char resp[128];
+            snprintf(resp, sizeof(resp), "{\"ok\":true,\"from\":[%d,%d],\"to\":[%d,%d]}", x1, y1, x2, y2);
+            SendResponse(client, 200, "application/json", resp, (int)strlen(resp));
         }
         else {
             // 返回 HTML 页面
