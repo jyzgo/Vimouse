@@ -15,5 +15,6 @@ std::string ReadAt(int x, int y, int width = 300, int height = 60);
 std::string CaptureScreenJPEG(int x1, int y1, int x2, int y2, int quality = 70);
 
 // 截取当前屏幕（鼠标所在的那个）保存为 JPEG，可叠加坐标网格
-// grid: 是否叠加字母坐标网格 (26列 x 26行, AA-ZZ)
-std::string CaptureCurrentScreen(int quality = 70, bool grid = false);
+// grid: 是否叠加字母坐标网格
+// maxWidth: 输出最大宽度（0=不限制，默认1920）
+std::string CaptureCurrentScreen(int quality = 70, bool grid = false, int maxWidth = 1920);
