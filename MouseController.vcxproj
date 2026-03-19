@@ -125,6 +125,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Common.h" />
+    <ClInclude Include="ScreenOCR.h" />
     <ClInclude Include="PipeServer.h" />
     <ClInclude Include="CommandHandler.h" />
     <ClInclude Include="WindowQuery.h" />
@@ -140,6 +141,7 @@
     <ClCompile Include="CommandHandler.cpp" />
     <ClCompile Include="WindowQuery.cpp" />
     <ClCompile Include="UIAutomation.cpp" />
+    <ClCompile Include="ScreenOCR.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MouseController.rc" />

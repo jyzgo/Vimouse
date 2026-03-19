@@ -1,6 +1,7 @@
 #include "CommandHandler.h"
 #include "WindowQuery.h"
 #include "UIAutomation.h"
+#include "ScreenOCR.h"
 #include <sstream>
 #include <thread>
 #include <chrono>
@@ -263,6 +264,32 @@ std::string HandleCommand(const std::string& command) {
         std::string name = parts[1];
         std::string type = parts.size() >= 3 ? parts[2] : "";
         return ClickUIElement(name, type);
+    }
+
+    // OCR 命令
+    // scan_region x1 y1 x2 y2
+    if (cmd == "scan_region") {
+        if (parts.size() < 5) return "ERR scan_region requires x1 y1 x2 y2";
+        int x1, y1, x2, y2;
+        if (!ParseInt(parts[1], x1) || !ParseInt(parts[2], y1) ||
+            !ParseInt(parts[3], x2) || !ParseInt(parts[4], y2))
+            return "ERR invalid coordinates";
+        return ScanRegion(x1, y1, x2, y2);
+    }
+
+    // read_at [x y] [width height]
+    if (cmd == "read_at") {
+        if (parts.size() >= 3) {
+            int x, y, w = 300, h = 60;
+            if (!ParseInt(parts[1], x) || !ParseInt(parts[2], y))
+                return "ERR invalid coordinates";
+            if (parts.size() >= 5) {
+                ParseInt(parts[3], w);
+                ParseInt(parts[4], h);
+            }
+            return ReadAt(x, y, w, h);
+        }
+        return ReadAtCursor();
     }
 
     return "ERR unknown command: " + cmd;

@@ -177,6 +177,26 @@ server.tool("click_element", "Find and click a UI element by name (uses Invoke p
   return toolResult(await sendCommand(cmd));
 });
 
+// --- Screen OCR Tools ---
+
+server.tool("scan_region", "OCR scan a screen region - returns recognized text with coordinates. Use this to 'see' what's on screen without screenshots.", {
+  x1: z.number().describe("Left edge X"),
+  y1: z.number().describe("Top edge Y"),
+  x2: z.number().describe("Right edge X"),
+  y2: z.number().describe("Bottom edge Y"),
+}, async ({ x1, y1, x2, y2 }) => {
+  return toolResult(await sendCommand(`scan_region ${x1} ${y1} ${x2} ${y2}`));
+});
+
+server.tool("read_at", "OCR read text near a screen position (default 300x60 area around the point)", {
+  x: z.number().describe("Center X coordinate"),
+  y: z.number().describe("Center Y coordinate"),
+  width: z.number().optional().default(300).describe("Capture width"),
+  height: z.number().optional().default(60).describe("Capture height"),
+}, async ({ x, y, width, height }) => {
+  return toolResult(await sendCommand(`read_at ${x} ${y} ${width} ${height}`));
+});
+
 // --- Start Server ---
 
 async function main() {
