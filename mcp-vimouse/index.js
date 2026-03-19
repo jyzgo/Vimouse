@@ -202,6 +202,23 @@ server.tool("read_at", "OCR read text near a screen position (default 300x60 are
   return toolResult(await sendCommand(`read_at ${x} ${y} ${width} ${height}`));
 });
 
+server.tool("screenshot", "Take a JPEG screenshot of the current screen (where mouse is). Can overlay coordinate grid.", {
+  grid: z.boolean().optional().default(false).describe("Overlay coordinate grid labels (AA-ZN) for position reference"),
+  quality: z.number().optional().default(70).describe("JPEG quality 1-100"),
+}, async ({ grid, quality }) => {
+  const cmd = grid ? `screenshot grid ${quality}` : `screenshot ${quality}`;
+  const result = await sendCommand(cmd);
+  if (!result.success) return { content: [{ type: "text", text: "Error: " + result.error }], isError: true };
+  return { content: [{ type: "text", text: "Screenshot saved: " + result.data }] };
+});
+
+server.tool("grid_click", "Click at a grid coordinate shown on screenshot (e.g. 'HF' = column H, row F). Take a screenshot with grid=true first.", {
+  label: z.string().length(2).describe("Two-letter grid label (e.g. 'HF', 'MA')"),
+  action: z.enum(["click", "rclick", "dclick"]).optional().default("click").describe("Click action"),
+}, async ({ label, action }) => {
+  return toolResult(await sendCommand(`grid_click ${label} ${action}`));
+});
+
 // --- High-level Automation Tools ---
 
 function loadHubIndex() {

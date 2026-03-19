@@ -293,19 +293,55 @@ std::string HandleCommand(const std::string& command) {
         return ReadAtCursor();
     }
 
-    // screenshot [x1 y1 x2 y2] [quality]
-    // 截取屏幕区域保存为 JPEG，返回文件路径
+    // screenshot [grid] [quality]
+    // 截取鼠标所在屏幕，可选叠加坐标网格
     if (cmd == "screenshot") {
-        int sx1 = 0, sy1 = 0, sx2 = GetSystemMetrics(SM_CXVIRTUALSCREEN), sy2 = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        bool grid = false;
         int quality = 70;
-        if (parts.size() >= 5) {
-            ParseInt(parts[1], sx1); ParseInt(parts[2], sy1);
-            ParseInt(parts[3], sx2); ParseInt(parts[4], sy2);
+        for (size_t i = 1; i < parts.size(); i++) {
+            if (parts[i] == "grid") grid = true;
+            else { int q; if (ParseInt(parts[i], q)) quality = q; }
         }
-        if (parts.size() >= 6) {
-            ParseInt(parts[5], quality);
+        return CaptureCurrentScreen(quality, grid);
+    }
+
+    // grid_click <label> [action] - 点击网格坐标 (如 "HF")
+    // action: click(默认), rclick, dclick
+    if (cmd == "grid_click") {
+        if (parts.size() < 2 || parts[1].size() != 2) return "ERR grid_click requires 2-letter label (e.g. HF)";
+        int col = toupper(parts[1][0]) - 'A';
+        int row = toupper(parts[1][1]) - 'A';
+        if (col < 0 || col >= 26 || row < 0 || row >= 14) return "ERR invalid grid label";
+
+        // 获取鼠标所在屏幕
+        POINT cursorPos;
+        GetCursorPos(&cursorPos);
+        HMONITOR hMon = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfo(hMon, &mi);
+
+        int screenW = mi.rcMonitor.right - mi.rcMonitor.left;
+        int screenH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        float cellW = (float)screenW / 26;
+        float cellH = (float)screenH / 14;
+
+        int x = mi.rcMonitor.left + (int)(col * cellW + cellW / 2);
+        int y = mi.rcMonitor.top + (int)(row * cellH + cellH / 2);
+
+        std::string action = parts.size() >= 3 ? parts[2] : "click";
+        SetCursorPos(x, y);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        if (action == "rclick") {
+            DoMouseClick(x, y, false, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP);
+        } else if (action == "dclick") {
+            DoMouseClick(x, y, false, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            DoMouseClick(x, y, false, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
+        } else {
+            DoMouseClick(x, y, false, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
         }
-        return CaptureScreenJPEG(sx1, sy1, sx2, sy2, quality);
+        return "OK " + std::to_string(x) + " " + std::to_string(y);
     }
 
     return "ERR unknown command: " + cmd;
