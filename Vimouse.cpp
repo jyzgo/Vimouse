@@ -1,6 +1,7 @@
 ﻿#include "Common.h"
 #include "PipeServer.h"
 #include "UIAutomation.h"
+#include "HttpServer.h"
 #include <shlobj.h>
 #include <shellapi.h>
 #include <iostream>
@@ -2435,6 +2436,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 启动 Named Pipe 服务端
         StartPipeServer();
 
+        // 启动 HTTP 截图服务器
+        StartHttpServer(59123);
+
         // 设置键盘钩子
         g_keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc,
             GetModuleHandle(NULL), 0);
@@ -2445,6 +2449,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     case WM_DESTROY:
+        // 停止 HTTP 服务器
+        StopHttpServer();
         // 停止 Pipe 服务端
         StopPipeServer();
         // 清理 UI Automation

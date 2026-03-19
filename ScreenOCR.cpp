@@ -214,3 +214,100 @@ std::string ReadAt(int x, int y, int width, int height) {
     if (y1 < 0) y1 = 0;
     return ScanRegion(x1, y1, x1 + width, y1 + height);
 }
+
+// 辅助：获取 JPEG encoder CLSID
+static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT num = 0, size = 0;
+    Gdiplus::GetImageEncodersSize(&num, &size);
+    if (size == 0) return -1;
+    auto* pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+    if (!pImageCodecInfo) return -1;
+    Gdiplus::GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j) {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            free(pImageCodecInfo);
+            return j;
+        }
+    }
+    free(pImageCodecInfo);
+    return -1;
+}
+
+std::string CaptureScreenJPEG(int x1, int y1, int x2, int y2, int quality) {
+    int w = x2 - x1;
+    int h = y2 - y1;
+    if (w <= 0 || h <= 0) return "ERR invalid region";
+
+    // 初始化 GDI+
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
+    // 截取屏幕
+    HDC hScreenDC = GetDC(NULL);
+    HDC hMemDC = CreateCompatibleDC(hScreenDC);
+    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, w, h);
+    HGDIOBJ oldBitmap = SelectObject(hMemDC, hBitmap);
+    BitBlt(hMemDC, 0, 0, w, h, hScreenDC, x1, y1, SRCCOPY);
+    SelectObject(hMemDC, oldBitmap);
+
+    // 缩放到最大 1920 宽度（节省文件大小）
+    int outW = w, outH = h;
+    if (outW > 1920) {
+        outH = outH * 1920 / outW;
+        outW = 1920;
+    }
+
+    // 创建 GDI+ Bitmap
+    Gdiplus::Bitmap* srcBmp = Gdiplus::Bitmap::FromHBITMAP(hBitmap, NULL);
+
+    Gdiplus::Bitmap* outBmp;
+    if (outW != w || outH != h) {
+        // 缩放
+        outBmp = new Gdiplus::Bitmap(outW, outH, PixelFormat24bppRGB);
+        Gdiplus::Graphics g(outBmp);
+        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        g.DrawImage(srcBmp, 0, 0, outW, outH);
+    } else {
+        outBmp = srcBmp;
+        srcBmp = nullptr; // 避免重复释放
+    }
+
+    // 保存为 JPEG
+    wchar_t tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    std::wstring jpegPath = std::wstring(tempPath) + L"vimouse_screenshot.jpg";
+
+    CLSID jpegClsid;
+    GetEncoderClsid(L"image/jpeg", &jpegClsid);
+
+    Gdiplus::EncoderParameters encoderParams;
+    encoderParams.Count = 1;
+    encoderParams.Parameter[0].Guid = Gdiplus::EncoderQuality;
+    encoderParams.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+    encoderParams.Parameter[0].NumberOfValues = 1;
+    ULONG qualityValue = quality;
+    encoderParams.Parameter[0].Value = &qualityValue;
+
+    Gdiplus::Status status = outBmp->Save(jpegPath.c_str(), &jpegClsid, &encoderParams);
+
+    // 清理
+    if (srcBmp) delete srcBmp;
+    if (outBmp != srcBmp) delete outBmp;
+    DeleteObject(hBitmap);
+    DeleteDC(hMemDC);
+    ReleaseDC(NULL, hScreenDC);
+    Gdiplus::GdiplusShutdown(gdiplusToken);
+
+    if (status != Gdiplus::Ok) {
+        return "ERR failed to save JPEG";
+    }
+
+    // 转为 UTF-8 路径
+    int pathLen = WideCharToMultiByte(CP_UTF8, 0, jpegPath.c_str(), -1, NULL, 0, NULL, NULL);
+    std::string pathUtf8(pathLen - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, jpegPath.c_str(), -1, &pathUtf8[0], pathLen, NULL, NULL);
+
+    return "OK " + pathUtf8;
+}

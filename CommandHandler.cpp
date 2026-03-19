@@ -3,6 +3,7 @@
 #include "UIAutomation.h"
 #include "ScreenOCR.h"
 #include <sstream>
+#include <fstream>
 #include <thread>
 #include <chrono>
 
@@ -290,6 +291,21 @@ std::string HandleCommand(const std::string& command) {
             return ReadAt(x, y, w, h);
         }
         return ReadAtCursor();
+    }
+
+    // screenshot [x1 y1 x2 y2] [quality]
+    // 截取屏幕区域保存为 JPEG，返回文件路径
+    if (cmd == "screenshot") {
+        int sx1 = 0, sy1 = 0, sx2 = GetSystemMetrics(SM_CXVIRTUALSCREEN), sy2 = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        int quality = 70;
+        if (parts.size() >= 5) {
+            ParseInt(parts[1], sx1); ParseInt(parts[2], sy1);
+            ParseInt(parts[3], sx2); ParseInt(parts[4], sy2);
+        }
+        if (parts.size() >= 6) {
+            ParseInt(parts[5], quality);
+        }
+        return CaptureScreenJPEG(sx1, sy1, sx2, sy2, quality);
     }
 
     return "ERR unknown command: " + cmd;

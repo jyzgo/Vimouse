@@ -10,3 +10,6 @@ std::string ReadAtCursor(int width = 300, int height = 60);
 
 // 读取指定位置附近的文字
 std::string ReadAt(int x, int y, int width = 300, int height = 60);
+
+// 截取屏幕区域保存为 JPEG，返回文件路径
+std::string CaptureScreenJPEG(int x1, int y1, int x2, int y2, int quality = 70);
