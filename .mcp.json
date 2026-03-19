@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "vimouse": {
+      "command": "node",
+      "args": ["mcp-vimouse/index.js"],
+      "cwd": "E:/OtherProjects/vimouse"
+    }
+  }
+}
