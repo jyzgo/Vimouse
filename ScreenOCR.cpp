@@ -366,7 +366,7 @@ static void DrawGrid(Gdiplus::Graphics& g, int w, int h) {
     }
 }
 
-std::string CaptureCurrentScreen(int quality, bool grid) {
+std::string CaptureCurrentScreen(int quality, bool grid, int maxWidth) {
     // 找鼠标所在屏幕
     POINT cursorPos;
     GetCursorPos(&cursorPos);
@@ -394,11 +394,11 @@ std::string CaptureCurrentScreen(int quality, bool grid) {
 
     Gdiplus::Bitmap* bmp = Gdiplus::Bitmap::FromHBITMAP(hBitmap, NULL);
 
-    // 缩放到 1920 宽
+    // 缩放到 maxWidth 宽
     int outW = w, outH = h;
-    if (outW > 1920) {
-        outH = outH * 1920 / outW;
-        outW = 1920;
+    if (maxWidth > 0 && outW > maxWidth) {
+        outH = outH * maxWidth / outW;
+        outW = maxWidth;
     }
 
     Gdiplus::Bitmap* outBmp = new Gdiplus::Bitmap(outW, outH, PixelFormat24bppRGB);

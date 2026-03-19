@@ -64,19 +64,22 @@ static const char* HTML_PAGE =
     "<button onclick='R()'>Refresh (F5)</button>"
     "<button onclick='DC()'>DblClick Mode</button>"
     "<button id='ba' onclick='TA()'>Auto: OFF</button>"
+    "<span style='color:#888'>W:</span><input id='wr' type='range' min='320' max='1920' value='960' step='160' style='width:100px' oninput='WR()'>"
+    "<span id='wl' style='color:#0f0'>960</span>"
     "<span id='status'></span>"
     "</div>"
     "<img id='s' src='/grid.jpg' draggable='false'/>"
     "<script>"
-    "var g=1,dbl=0,au=0,atm=0;"
+    "var g=1,dbl=0,au=0,atm=0,mw=960;"
     "function TG(v){g=v;document.getElementById('bg').className=g?'act':'';"
     "document.getElementById('bc').className=g?'':'act';R()}"
     "function DC(){dbl=!dbl;document.getElementById('status').textContent=dbl?'DblClick ON':''}"
     "function TA(){au=!au;document.getElementById('ba').textContent=au?'Auto: ON':'Auto: OFF';"
     "document.getElementById('ba').className=au?'act':'';"
     "if(atm)clearInterval(atm);atm=au?setInterval(R,2000):0}"
+    "function WR(){mw=document.getElementById('wr').value;document.getElementById('wl').textContent=mw}"
     "function R(){var s=document.getElementById('s');"
-    "s.src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()}"
+    "s.src=(g?'/grid.jpg':'/screenshot.jpg')+'?t='+Date.now()+'&w='+mw}"
     "function S(m){document.getElementById('status').textContent=m;"
     "setTimeout(function(){document.getElementById('status').textContent=''},1500)}"
     /* click handler */
@@ -189,7 +192,14 @@ static void HttpServerThread(int port) {
 
         if (path == "/screenshot.jpg" || path == "/grid.jpg") {
             bool grid = (path == "/grid.jpg");
-            std::string result = CaptureCurrentScreen(60, grid);
+            int maxW = 1920;
+            std::string wParam = getParam("w");
+            if (!wParam.empty()) maxW = atoi(wParam.c_str());
+            if (maxW < 160) maxW = 160;
+            if (maxW > 3840) maxW = 3840;
+            // 质量随分辨率调整
+            int q = maxW <= 480 ? 40 : (maxW <= 960 ? 55 : 65);
+            std::string result = CaptureCurrentScreen(q, grid, maxW);
             if (result.substr(0, 3) == "OK ") {
                 std::string filePath = result.substr(3);
                 std::vector<char> fileData;
