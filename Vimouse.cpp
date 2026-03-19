@@ -419,6 +419,7 @@ void GoToNextPosition() {
 
 // 平滑移动线程函数
 void SmoothMoveThread() {
+    DWORD accelerationStartTime = GetTickCount();
     while (g_shouldMove) {
         POINT currentPos;
         GetCursorPos(&currentPos);
@@ -428,11 +429,8 @@ void SmoothMoveThread() {
 
         // 检查是否需要加速
         if (g_hPressed || g_jPressed || g_kPressed || g_lPressed || g_uPressed || g_oPressed || g_nPressed || g_dotPressed) {
-            // 动态加速：每0.01秒增加速度
-            static DWORD lastMoveTime = GetTickCount();
-            static DWORD accelerationStartTime = GetTickCount();
-
-            if (GetTickCount() - accelerationStartTime > 5) { // 每10ms加速一次
+            // 动态加速：每5ms增加速度
+            if (GetTickCount() - accelerationStartTime > 5) { // 每5ms加速一次
                 g_mouseSpeed += g_acceleratedSpeed;
                 if (g_mouseSpeed > g_maxSpeed) {
                     g_mouseSpeed = g_maxSpeed;
@@ -577,7 +575,7 @@ LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             memDC, 0, 0, SRCCOPY);
 
         // 清理资源
-        SelectObject(memDC, oldFont);
+        SelectObject(memDC, oldBitmap);
         DeleteObject(memBitmap);
         DeleteDC(memDC);
 
@@ -605,7 +603,7 @@ LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     default:
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
-    //return 0;
+    return 0;
 }
 
 // 创建Grid窗口的窗口过程
@@ -684,7 +682,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             memDC, 0, 0, SRCCOPY);
 
         // 清理资源
-        SelectObject(memDC, oldFont);
+        SelectObject(memDC, oldBitmap);
         DeleteObject(memBitmap);
         DeleteDC(memDC);
 
@@ -811,7 +809,7 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             memDC, 0, 0, SRCCOPY);
 
         // 清理资源
-        SelectObject(memDC, oldFont);
+        SelectObject(memDC, oldBitmap);
         DeleteObject(memBitmap);
         DeleteDC(memDC);
 
@@ -873,6 +871,7 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     default:
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
+    return 0;
 }
 
 // 状态指示器窗口过程
@@ -1588,7 +1587,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         //    (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_altPressed)
         //);
         // 检查 Ctrl+\ 切换激活状态
-        if (isKeyDown && (vkCode == 'J' && g_ctrlPressed ) || (vkCode == 'K' && g_ctrlPressed && g_altPressed)) {
+        if (isKeyDown && ((vkCode == 'J' && g_ctrlPressed) || (vkCode == 'K' && g_ctrlPressed && g_altPressed))) {
             g_isActive = !g_isActive;
             if (g_isActive) {
 
@@ -1626,7 +1625,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             // 更新指示器位置
             UpdateIndicatorPosition();
             return 1;
-            return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Ctrl+\正常工作
         }
 
         GetCursorPos(&g_lastMousePos);  // 记录当前位置
@@ -1866,7 +1864,6 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                             ExitHintMode(true);
                         }
                         return 1;
-                        return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让字母键正常工作
                     }
                 }
                 // 对于hint模式下非字母和Esc键，直接阻止
