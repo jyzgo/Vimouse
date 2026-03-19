@@ -257,7 +257,10 @@ static const char* HTML_PAGE =
     "fetch('/api/scroll?dir='+dir+'&amt='+amt);"
     "setTimeout(R,400)"
     "},{passive:false});"
-    /* keyboard: F5, Ctrl+C, Ctrl+V */
+    /* keyboard input forwarding */
+    "var _KS={'Enter':'enter','Backspace':'backspace','Tab':'tab','Escape':'escape',"
+    "'ArrowUp':'up','ArrowDown':'down','ArrowLeft':'left','ArrowRight':'right',"
+    "'Delete':'delete','Home':'home','End':'end','PageUp':'pageup','PageDown':'pagedown'};"
     "document.addEventListener('keydown',function(e){"
     "if(e.key==='F5'){e.preventDefault();R()}"
     "if(e.ctrlKey&&e.key==='c'){"
@@ -284,6 +287,20 @@ static const char* HTML_PAGE =
     "setTimeout(R,300)"
     "})})"
     "}"
+    "if(e.ctrlKey&&e.key==='a'){e.preventDefault();fetch('/api/keypress?key=ctrl_a');return}"
+    "if(e.ctrlKey&&e.key==='z'){e.preventDefault();fetch('/api/keypress?key=ctrl_z');return}"
+    "if(e.ctrlKey&&e.key==='x'){e.preventDefault();"
+    "var x1=new XMLHttpRequest();x1.open('GET','/api/keypress?key=ctrl_x',false);x1.send();"
+    "var x2=new XMLHttpRequest();x2.open('GET','/api/clipboard',false);x2.send();"
+    "var d;try{d=JSON.parse(x2.responseText)}catch(ex){return}"
+    "if(d.text){var ta=document.createElement('textarea');ta.value=d.text;"
+    "ta.setAttribute('style','position:fixed;top:0;left:0;width:100px;height:100px;opacity:0.01;user-select:text');"
+    "document.body.appendChild(ta);ta.focus();ta.select();"
+    "document.execCommand('copy');document.body.removeChild(ta);"
+    "S('Cut: '+d.text.substring(0,40))}return}"
+    "if(e.ctrlKey||e.altKey||e.metaKey)return;"
+    "if(_KS[e.key]){e.preventDefault();fetch('/api/type?special='+_KS[e.key]);return}"
+    "if(e.key.length===1){e.preventDefault();fetch('/api/type?char='+encodeURIComponent(e.key))}"
     "});"
     /* 加载保存的配置 */
     "fetch('/api/config').then(function(r){return r.json()}).then(function(c){"
@@ -522,10 +539,79 @@ static void HttpServerThread(int port) {
                 Sleep(50);
             } else if (key == "ctrl_c") {
                 SimulateKeyCombo(VK_CONTROL, 'C');
-                Sleep(200); // 等待应用写入剪贴板
+                Sleep(200);
             } else if (key == "ctrl_a") {
                 SimulateKeyCombo(VK_CONTROL, 'A');
                 Sleep(50);
+            } else if (key == "ctrl_z") {
+                SimulateKeyCombo(VK_CONTROL, 'Z');
+                Sleep(50);
+            } else if (key == "ctrl_x") {
+                SimulateKeyCombo(VK_CONTROL, 'X');
+                Sleep(200);
+            }
+            SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
+        }
+        else if (path == "/api/type") {
+            std::string ch = getParam("char");
+            std::string special = getParam("special");
+
+            if (!ch.empty()) {
+                // URL decode: %xx
+                std::string decoded;
+                for (size_t i = 0; i < ch.size(); i++) {
+                    if (ch[i] == '%' && i + 2 < ch.size()) {
+                        int val = 0;
+                        sscanf(ch.c_str() + i + 1, "%2x", &val);
+                        decoded += (char)val;
+                        i += 2;
+                    } else if (ch[i] == '+') {
+                        decoded += ' ';
+                    } else {
+                        decoded += ch[i];
+                    }
+                }
+                // UTF-8 to UTF-16 for SendInput
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, decoded.c_str(), -1, NULL, 0);
+                if (wlen > 1) {
+                    std::vector<wchar_t> wstr(wlen);
+                    MultiByteToWideChar(CP_UTF8, 0, decoded.c_str(), -1, wstr.data(), wlen);
+                    for (int i = 0; i < wlen - 1; i++) {
+                        INPUT inputs[2] = {};
+                        inputs[0].type = INPUT_KEYBOARD;
+                        inputs[0].ki.wScan = wstr[i];
+                        inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
+                        inputs[1].type = INPUT_KEYBOARD;
+                        inputs[1].ki.wScan = wstr[i];
+                        inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+                        SendInput(2, inputs, sizeof(INPUT));
+                    }
+                }
+            } else if (!special.empty()) {
+                WORD vk = 0;
+                if (special == "enter") vk = VK_RETURN;
+                else if (special == "backspace") vk = VK_BACK;
+                else if (special == "tab") vk = VK_TAB;
+                else if (special == "escape") vk = VK_ESCAPE;
+                else if (special == "up") vk = VK_UP;
+                else if (special == "down") vk = VK_DOWN;
+                else if (special == "left") vk = VK_LEFT;
+                else if (special == "right") vk = VK_RIGHT;
+                else if (special == "delete") vk = VK_DELETE;
+                else if (special == "home") vk = VK_HOME;
+                else if (special == "end") vk = VK_END;
+                else if (special == "pageup") vk = VK_PRIOR;
+                else if (special == "pagedown") vk = VK_NEXT;
+
+                if (vk) {
+                    INPUT inputs[2] = {};
+                    inputs[0].type = INPUT_KEYBOARD;
+                    inputs[0].ki.wVk = vk;
+                    inputs[1].type = INPUT_KEYBOARD;
+                    inputs[1].ki.wVk = vk;
+                    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(2, inputs, sizeof(INPUT));
+                }
             }
             SendResponse(client, 200, "application/json", "{\"ok\":true}", 11);
         }
