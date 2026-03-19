@@ -592,12 +592,44 @@ static void HttpServerThread(int port) {
                     std::vector<wchar_t> wstr(wlen);
                     MultiByteToWideChar(CP_UTF8, 0, decoded.c_str(), -1, wstr.data(), wlen);
                     for (int i = 0; i < wlen - 1; i++) {
+                        wchar_t wc = wstr[i];
+                        // ASCII 字符用虚拟键码发送，让 IME 能拦截
+                        if (wc >= 0x20 && wc <= 0x7E) {
+                            SHORT vks = VkKeyScanW(wc);
+                            if (vks != -1) {
+                                BYTE vk = LOBYTE(vks);
+                                BYTE shift = HIBYTE(vks);
+                                INPUT inputs[4] = {};
+                                int n = 0;
+                                if (shift & 1) { // Shift needed
+                                    inputs[n].type = INPUT_KEYBOARD;
+                                    inputs[n].ki.wVk = VK_SHIFT;
+                                    n++;
+                                }
+                                inputs[n].type = INPUT_KEYBOARD;
+                                inputs[n].ki.wVk = vk;
+                                n++;
+                                inputs[n].type = INPUT_KEYBOARD;
+                                inputs[n].ki.wVk = vk;
+                                inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+                                n++;
+                                if (shift & 1) {
+                                    inputs[n].type = INPUT_KEYBOARD;
+                                    inputs[n].ki.wVk = VK_SHIFT;
+                                    inputs[n].ki.dwFlags = KEYEVENTF_KEYUP;
+                                    n++;
+                                }
+                                SendInput(n, inputs, sizeof(INPUT));
+                                continue;
+                            }
+                        }
+                        // 非 ASCII 字符用 UNICODE 直接输入
                         INPUT inputs[2] = {};
                         inputs[0].type = INPUT_KEYBOARD;
-                        inputs[0].ki.wScan = wstr[i];
+                        inputs[0].ki.wScan = wc;
                         inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
                         inputs[1].type = INPUT_KEYBOARD;
-                        inputs[1].ki.wScan = wstr[i];
+                        inputs[1].ki.wScan = wc;
                         inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
                         SendInput(2, inputs, sizeof(INPUT));
                     }
