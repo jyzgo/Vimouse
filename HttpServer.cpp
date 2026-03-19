@@ -52,7 +52,7 @@ static const char* HTML_PAGE =
     "<!DOCTYPE html><html><head><title>Vimouse Remote</title>"
     "<style>"
     "body{margin:0;background:#111;display:flex;flex-direction:column;align-items:center;height:100vh;overflow:hidden;user-select:none}"
-    "img{max-width:100vw;max-height:calc(100vh - 40px);object-fit:contain;cursor:crosshair}"
+    "img{width:100vw;height:calc(100vh - 40px);object-fit:fill;cursor:crosshair;image-rendering:auto}"
     ".bar{height:36px;display:flex;align-items:center;gap:10px;color:#aaa;font:13px monospace;padding:2px 10px;width:100%;box-sizing:border-box}"
     "button{background:#333;color:#0f0;border:1px solid #555;padding:3px 12px;cursor:pointer;font:13px monospace;border-radius:3px}"
     "button:hover{background:#444}.act{background:#060;border-color:#0f0}"
