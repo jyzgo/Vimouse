@@ -5,171 +5,150 @@
 
 ## 中文说明
 
-**Vimouse** 是一个专为 Vim 用户设计的小工具，让你完全通过键盘控制鼠标移动、点击和滚动，无需离开键盘。
+**Vimouse** 是一个专为 Vim 用户设计的键盘鼠标控制器，完全通过键盘控制鼠标移动、点击和滚动。运行后常驻系统托盘，无窗口。
 
-### 快捷键说明
+### 快捷键
 
-- **启动 Normal 模式**：`Ctrl + J` or `Crtl + Alt + K` 
-  - 使用`Ctrl + Alt + K` 时,光标会自动居中
-- **退出模式**：`Esc` 或 `Enter`  
-  - 使用 `Enter` 退出时，会自动点击鼠标左键，用于聚焦当前窗口
+#### 激活/退出
+| 按键 | 功能 |
+|------|------|
+| `Ctrl+J` | 切换 Vimouse 模式 |
+| `Ctrl+Alt+K` | 切换并居中光标 |
+| `Esc` | 退出当前模式/退出 Vimouse |
+| `Enter` | 左键点击 + 退出 |
 
-#### Normal 模式
-- `h` / `j` / `k` / `l`：鼠标向左 / 下 / 上 / 右移动
--  `u`/`o`/`n`/`.`: 分别代表 ↖️↗️ ↙️ ↘️的移动方向
-- `f`：鼠标左键点击
-- `g`：鼠标右键点击
-  `r`: 返回上一个鼠标点击位置 (f)
-  `e`: 返回下一个鼠标点击位置
-- `y`：进入滚轮模式（Wheel Mode）  
-  - 进入后，使用 `h`/`j`/`k`/`l` 控制页面滚动（模拟滚轮）
-- `i`：进入网格模式（Grid Mode）
-- `m`：进入地图模式（Hint Mode）
-- `q`: 添加/移除 tag
-  -在鼠标当前位置生成一个字母tag,可以进入tag模式导航
-  -如果当前位置已经有tag,则会移除此tag
-- `w`: 进入tag模式
-#### Tag 模式
-- 进入后屏幕上的tag会高亮,此时按对应的字母按键 光标会移动过去,之后自动退出Tag模式
-- 直接使用鼠标点击高亮的tag可以直接删掉.
+#### 移动
+| 按键 | 功能 |
+|------|------|
+| `h/j/k/l` | 左/下/上/右（长按加速） |
+| `u/o/n/.` | 左上/右上/左下/右下（对角） |
+| `Shift+移动键` | 精确 1 像素移动 |
 
-#### Grid 模式
-- 使用 `Q` / `W` / `A` / `S` 将鼠标移动到屏幕对应的四分之一区域
-- 在此模式下按 `h`/`j`/`k`/`l` 会自动退出 Grid 模式
+#### 点击
+| 按键 | 功能 |
+|------|------|
+| `f` | 左键（按住不松=hold） |
+| `g` | 右键 |
+| `b` | 中键 |
+| `Shift+f` | Shift+左键（范围选择） |
+| `v` | 拖拽开关 |
 
-#### Hint 模式
-- 按 `m` 后，屏幕会被覆盖上由两个字母组成的“坐标对”（如 AA, AB, AC...）
-- 输入任意两个字母（如 `AB`），鼠标将立即移动到对应位置
-- 支持 `Esc` 退出，或 `Enter` 退出并自动左键点击（用于聚焦）
-- `r`：返回上一个区块（网格模式）
-### 其他特性
-- 兼容常用系统快捷键（如 `Ctrl+A` 全选、`Ctrl+C` 复制等），不会干扰正常操作
-- 轻量、无依赖、启动即用
+#### 定位模式
+| 按键 | 功能 |
+|------|------|
+| `m` | Hint 模式 — 输入两个字母跳转到屏幕坐标，之后自动进入 mini grid 精确微调 |
+| `i` | Grid 二分模式 — 第一次在鼠标位置分屏，再按 `i` 切到屏幕中心分屏 |
+| `c` | 跳到屏幕中心（连按切换多屏） |
 
-### 灵感来源
-本项目深受 [warpd](https://github.com/rvaiya/warpd) 启发，但重新设计了更符合个人习惯的快捷键布局。
+#### Grid 模式操作
+| 按键 | 功能 |
+|------|------|
+| `h/j/k/l` | 选择左/下/上/右半区 |
+| `u/o/n/.` | 选择四个象限 |
+| `r` | 返回上一级 |
+| `i` | 退出 grid / 切换到屏幕中心 grid |
+| `f/g` | 在当前位置左键/右键点击并退出 |
 
-### 联系与维护
-如有问题或发现 Bug，欢迎邮件联系：**jyzgo0125@gmail.com**  
-> ⚠️ 注意：此项目为个人兴趣开发，因工作繁忙，**不会频繁更新**，敬请谅解。
+#### 标签系统
+| 按键 | 功能 |
+|------|------|
+| `q` | 在当前位置放置/移除标签 |
+| `w` | 进入标签跳转模式 |
 
----
+#### 其他
+| 按键 | 功能 |
+|------|------|
+| `y` | 滚轮模式（j/k 上下滚） |
+| `r/e` | 回退/前进历史位置 |
 
-## English README
----
+### 系统托盘
 
-# Vimouse  
-*A keyboard-driven mouse controller for Vim lovers*
+右键托盘图标：
+- **启用键盘控制** — 开关切换
+- **悬浮帮助** — 可拖动的半透明快捷键参考窗口（位置持久化）
+- **操作指南** — 弹出帮助对话框
+- **退出**
 
-## Overview
+### 管道 IPC
 
-**Vimouse** is a lightweight utility designed for Vim enthusiasts who want to control the mouse entirely from the keyboard—no hand movement required. Navigate, click, scroll, and tag positions on screen using intuitive, Vim-inspired keybindings.
+其他程序可通过命名管道 `\\.\pipe\vimouse` 发送命令控制鼠标键盘：
 
-Stay in the flow. Keep your fingers on the home row.
+```
+move x y          移动光标
+click [x y]       左键点击
+rclick [x y]      右键点击
+dclick [x y]      双击
+mclick [x y]      中键点击
+drag x1 y1 x2 y2  拖拽
+scroll up|down|left|right [n]  滚动
+pos               获取光标位置
+keypress combo    组合键（如 ctrl+c）
+type text         输入文本（UTF-8）
+tags / tag <letter> [click]  标签操作
+status            查询状态
+activate/deactivate  远程开关
+screen            屏幕信息
+help              命令列表
+```
 
----
+命令行模式：`Vimouse.exe -c "命令"` 或 `Vimouse.exe -f 脚本.txt`
 
-## Keybindings
+### 视觉反馈
 
-### Entering Normal Mode
-- **Activate Normal Mode**: `Ctrl + J` or `Ctrl + Alt + K`  
-  - Using `Ctrl + Alt + K` centers the cursor on screen automatically.
-
-### Exiting Any Mode 
-- **Exit mode**: `Esc` or `Enter`  
-  - Pressing `Enter` exits and **automatically left-clicks**, useful for focusing the current window.
-
----
-
-### Normal Mode
-- `h` / `j` / `k` / `l` → Move mouse left / down / up / right  
-- `u` / `o` / `n` / `.` → Move diagonally: ↖️ / ↗️ / ↙️ / ↘️  
-- `f` → Left mouse click  
-- `g` → Right mouse click  
-- `r` → Return to the **previous** clicked position  
-- `e` → Go to the **next** clicked position (in history)  
-- `y` → Enter **Wheel Mode**  
-  - In Wheel Mode, use `h`/`j`/`k`/`l` to scroll horizontally or vertically (simulates mouse wheel)  
-- `i` → Enter **Grid Mode**  
-- `m` → Enter **Hint Mode** (also called "Map Mode")  
-- `q` → Toggle **Tag** at current mouse position  
-  - Creates a single-letter tag (e.g., `A`, `B`) at the cursor location  
-  - If a tag already exists there, it is removed  
-- `w` → Enter **Tag Mode**
-
----
-
-### Tag Mode
-- All defined tags appear highlighted on screen  
-- Press the corresponding letter (e.g., `A`) to **move the cursor to that tag**  
-- Tag Mode exits automatically after navigation
-- Click tag with mouse will delete it.
+- **自定义光标**：激活时绿色十字准星，移动时橙色，退出恢复系统默认
+- **坐标标签**：鼠标旁显示两个彩色字母（Hint 坐标），停止移动时更新
+- **点击反馈**：点击时字母变大变黄
+- **Hint 棋盘格**：交替背景色区分格子边界
+- **Grid 指引线**：十字线 + 对角线 + 8 方向按键标签
 
 ---
 
-### Grid Mode
-- `Q` / `W` / `A` / `S` → Jump mouse to one of the four screen quadrants:  
-  - `Q`: Top-left  `W`: Top-right  
-  - `A`: Bottom-left `S`: Bottom-right  
-- Pressing `h`/`j`/`k`/`l` in Grid Mode **exits back to Normal Mode**
+## English
 
----
+**Vimouse** is a lightweight keyboard-driven mouse controller for Vim users. Runs as a system tray application.
 
-### Hint Mode (Map Mode)
-- After pressing `m`, the screen is overlaid with two-letter coordinate hints (e.g., `AA`, `AB`, `AC`, …)  
-- Type any **two-letter combination** (e.g., `AB`) to instantly move the mouse to that region  
-- `Esc` → Exit without clicking  
-- `Enter` → Exit and **left-click** (useful for activating UI elements)  
-- `r` → Return to the last grid/hint block used
+### Quick Reference
 
----
+| Key | Action |
+|-----|--------|
+| `Ctrl+J` | Toggle Vimouse mode |
+| `h/j/k/l` | Move left/down/up/right (hold to accelerate) |
+| `Shift+move` | Precise 1-pixel movement |
+| `u/o/n/.` | Diagonal movement |
+| `f` | Left click (hold) |
+| `g` | Right click |
+| `b` | Middle click |
+| `v` | Drag toggle |
+| `m` | Hint mode (2-letter jump + mini grid) |
+| `i` | Grid bisect (1st: at cursor, 2nd: screen center) |
+| `y` | Scroll mode |
+| `q` | Place/remove tag |
+| `w` | Tag jump mode |
+| `c` | Screen center (multi-press cycles monitors) |
+| `r/e` | Prev/next position history |
+| `Esc` | Exit mode |
+| `Enter` | Click + exit |
 
-## Additional Features
-- ✅ **Non-intrusive**: Common system shortcuts (e.g., `Ctrl+C`, `Ctrl+V`, `Ctrl+A`) are **passed through unaffected**  
-- ✅ **Zero dependencies**: Runs as a single executable  
-- ✅ **Instant launch**: No setup or configuration needed  
-- ✅ **Low resource usage**: Minimal CPU and memory footprint
+### Pipe IPC
+
+Control via named pipe `\\.\pipe\vimouse`:
+```
+move, click, rclick, dclick, mclick, drag, scroll, pos,
+keypress, type, tags, tag, status, activate, deactivate, screen, help
+```
+
+CLI: `Vimouse.exe -c "command"` or `Vimouse.exe -f script.txt`
 
 ---
 
 ## Inspiration
-Vimouse is heavily inspired by [**warpd**](https://github.com/rvaiya/warpd), but reimagined with a keybinding layout optimized for personal workflow and Vim muscle memory.
 
----
+Inspired by [**warpd**](https://github.com/rvaiya/warpd), reimagined with Vim-native keybindings and system tray integration.
 
-## Contact & Maintenance
-Found a bug or have a suggestion? Feel free to reach out via email: **jyzgo0125@gmail.com**
+## Contact
 
-> ⚠️ **Note**: This is a personal side project. Due to limited availability, **updates will be infrequent**. Your understanding is appreciated!
-
----
-
-Happy keyboard mousing! 🖱️⌨️
+Bug reports & suggestions: **jyzgo0125@gmail.com**
 
 ## License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-
-```text
-MIT License
-
-Copyright (c) 2025 jyzgo
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+MIT License — see [LICENSE](LICENSE) for details.
