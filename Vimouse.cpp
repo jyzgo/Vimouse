@@ -41,6 +41,12 @@ bool g_ctrlPressed = false;  // 跟踪Ctrl键状态
 bool g_altPressed = false;
 bool g_winPressed = false;   // 跟踪Win键状态
 bool g_shiftPressed = false; // 跟踪Shift键状态
+bool g_clickFlash = false;   // 点击闪烁标记
+bool g_miniGridMode = false; // hint后的单层mini grid模式
+bool g_gridCustomCenter = false;  // grid模式是否使用自定义中心点
+POINT g_gridCenter = { 0, 0 };     // grid自定义中心点（屏幕坐标）
+HWND g_helpWindow = NULL;    // 帮助悬浮窗
+bool g_helpVisible = false;  // 帮助窗口是否可见
 
 // 平滑移动相关变量
 bool g_hPressed = false;
@@ -284,6 +290,210 @@ void DebugLog(const char* format, ...) {
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     OutputDebugStringA(buffer);
+}
+
+static bool IsSystemChinese();  // 前向声明
+// ============ 帮助悬浮窗 ============
+
+static std::string GetHelpConfigPath() {
+    char path[MAX_PATH];
+    HRESULT result = SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, path);
+    if (FAILED(result)) return "";
+    return std::string(path) + "/Vimouse/.help_pos";
+}
+
+static void SaveHelpPos() {
+    if (!g_helpWindow) return;
+    RECT r;
+    GetWindowRect(g_helpWindow, &r);
+    std::string path = GetHelpConfigPath();
+    if (path.empty()) return;
+    std::ofstream f(path);
+    if (f.is_open()) {
+        f << r.left << " " << r.top << " " << (g_helpVisible ? 1 : 0) << "\n";
+        f.close();
+    }
+}
+
+static void LoadHelpPos(int& x, int& y, bool& visible) {
+    x = -1; y = -1; visible = false;
+    std::string path = GetHelpConfigPath();
+    if (path.empty()) return;
+    std::ifstream f(path);
+    if (f.is_open()) {
+        int v = 0;
+        f >> x >> y >> v;
+        visible = (v != 0);
+        f.close();
+    }
+}
+
+static HFONT g_helpFont = NULL;
+
+LRESULT CALLBACK HelpWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        // 背景
+        HBRUSH bg = CreateSolidBrush(RGB(20, 20, 30));
+        FillRect(hdc, &rc, bg);
+        DeleteObject(bg);
+
+        if (!g_helpFont)
+            g_helpFont = CreateFont(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+
+        SetBkMode(hdc, TRANSPARENT);
+        HGDIOBJ oldFont = SelectObject(hdc, g_helpFont);
+
+        const char** lines;
+        int lineCount;
+
+        static const char* lines_zh[] = {
+            " Vimouse \xBF\xEC\xCB\xD9\xB2\xCE\xBF\xBC",  // placeholder, use wide below
+            "", "", "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "", "",
+        };
+        // Use wide char for Chinese
+        const wchar_t* wlines_zh[] = {
+            L" Vimouse \u5FEB\u901F\u53C2\u8003",
+            L" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+            L" Ctrl+J  \u5F00\u5173\u6FC0\u6D3B",
+            L" h/j/k/l \u79FB\u52A8(\u957F\u6309\u52A0\u901F)",
+            L" Shift+  \u7CBE\u786E1\u50CF\u7D20",
+            L" u/o/n/. \u5BF9\u89D2\u79FB\u52A8",
+            L" f  \u5DE6\u952E(\u6309\u4F4F)",
+            L" g  \u53F3\u952E",
+            L" b  \u4E2D\u952E",
+            L" v  \u62D6\u62FD\u5F00\u5173",
+            L" m  Hint\u8DF3\u8F6C(2\u5B57\u6BCD)",
+            L" i  Grid\u4E8C\u5206\u5B9A\u4F4D",
+            L" y  \u6EDA\u8F6E\u6A21\u5F0F",
+            L" w  \u6807\u7B7E\u8DF3\u8F6C",
+            L" q  \u653E\u7F6E\u6807\u7B7E",
+            L" c  \u5C4F\u5E55\u4E2D\u5FC3/\u5207\u6362",
+            L" r/e  \u524D\u8FDB/\u540E\u9000\u4F4D\u7F6E",
+            L" Enter  \u70B9\u51FB+\u9000\u51FA",
+            L" Esc    \u9000\u51FA\u6A21\u5F0F",
+        };
+        const char* lines_en[] = {
+            " Vimouse Quick Ref",
+            " -----------------",
+            " Ctrl+J  Toggle ON/OFF",
+            " h/j/k/l Move (hold=accel)",
+            " Shift+  Precise 1px",
+            " u/o/n/. Diagonal",
+            " f  Left click (hold)",
+            " g  Right click",
+            " b  Middle click",
+            " v  Drag toggle",
+            " m  Hint jump (2-letter)",
+            " i  Grid bisect mode",
+            " y  Scroll mode",
+            " w  Tag jump mode",
+            " q  Place tag",
+            " c  Screen center/switch",
+            " r/e  Prev/Next position",
+            " Enter  Click + exit",
+            " Esc    Exit mode",
+        };
+        bool isChinese = IsSystemChinese();
+        lineCount = 19;
+
+        for (int i = 0; i < lineCount; i++) {
+            RECT tr = { 4, 4 + i * 15, rc.right - 4, 4 + (i + 1) * 15 };
+            if (i == 0) {
+                SetTextColor(hdc, RGB(80, 255, 160));
+            } else if (i == 1) {
+                SetTextColor(hdc, RGB(60, 60, 80));
+            } else {
+                SetTextColor(hdc, RGB(180, 180, 200));
+            }
+            if (isChinese) {
+                DrawTextW(hdc, wlines_zh[i], -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            } else {
+                DrawTextA(hdc, lines_en[i], -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            }
+        }
+
+        SelectObject(hdc, oldFont);
+        EndPaint(hwnd, &ps);
+        break;
+    }
+    case WM_LBUTTONDOWN:
+        // 允许拖动窗口
+        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        break;
+    case WM_MOVE:
+        // 位置变化时保存
+        SaveHelpPos();
+        break;
+    case WM_CLOSE:
+        g_helpVisible = false;
+        ShowWindow(hwnd, SW_HIDE);
+        SaveHelpPos();
+        return 0; // 不销毁窗口
+    default:
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0;
+}
+
+void CreateHelpWindow() {
+    WNDCLASSEX wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEX);
+    wc.lpfnWndProc = HelpWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"VimouseHelpClass";
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    RegisterClassEx(&wc);
+
+    int helpW = 210, helpH = 300;
+
+    // 加载上次位置
+    int posX, posY;
+    bool wasVisible;
+    LoadHelpPos(posX, posY, wasVisible);
+
+    if (posX < 0 || posY < 0) {
+        // 默认：右下角
+        int screenW = GetSystemMetrics(SM_CXSCREEN);
+        int screenH = GetSystemMetrics(SM_CYSCREEN);
+        posX = screenW - helpW - 20;
+        posY = screenH - helpH - 60;
+    }
+
+    g_helpWindow = CreateWindowEx(
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+        L"VimouseHelpClass",
+        L"Vimouse Help",
+        WS_POPUP,
+        posX, posY, helpW, helpH,
+        NULL, NULL, GetModuleHandle(NULL), NULL
+    );
+
+    if (g_helpWindow) {
+        SetLayeredWindowAttributes(g_helpWindow, 0, 180, LWA_ALPHA);
+        g_helpVisible = wasVisible;
+        ShowWindow(g_helpWindow, wasVisible ? SW_SHOWNA : SW_HIDE);
+    }
+}
+
+void ToggleHelpWindow() {
+    if (!g_helpWindow) return;
+    g_helpVisible = !g_helpVisible;
+    if (g_helpVisible) {
+        SetWindowPos(g_helpWindow, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    } else {
+        ShowWindow(g_helpWindow, SW_HIDE);
+    }
+    SaveHelpPos();
 }
 
 // 获取配置文件路径
@@ -558,6 +768,9 @@ void SmoothMoveThread() {
         if (moved) {
             SetCursorPos(newX, newY);
 
+            // 移动线程不操作任何窗口（避免跨线程 UI 导致卡死）
+            // 坐标标签在 StopSmoothMove → UpdateIndicatorPosition 时更新
+
             // 如果正在拖动，继续发送拖动事件
             if (g_isDragging) {
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
@@ -686,73 +899,114 @@ LRESULT CALLBACK TagWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 // 创建Grid窗口的窗口过程
+// Grid 缓存资源（只创建一次）
+static HBRUSH g_gridBgBrush = NULL;
+static HPEN g_gridCrossPen = NULL;
+static HPEN g_gridDiagPen = NULL;
+static HFONT g_gridLabelFont = NULL;
+static int g_gridLabelFontSize = 0;
+
+static void EnsureGridResources(int fontSize) {
+    if (!g_gridBgBrush) g_gridBgBrush = CreateSolidBrush(RGB(0, 0, 0));
+    if (!g_gridCrossPen) g_gridCrossPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+    if (!g_gridDiagPen) g_gridDiagPen = CreatePen(PS_SOLID, 1, RGB(120, 120, 120));
+    if (!g_gridLabelFont || g_gridLabelFontSize != fontSize) {
+        if (g_gridLabelFont) DeleteObject(g_gridLabelFont);
+        g_gridLabelFont = CreateFont(fontSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Consolas");
+        g_gridLabelFontSize = fontSize;
+    }
+}
+
 LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
 
-        // 获取窗口客户区大小
         RECT clientRect;
         GetClientRect(hwnd, &clientRect);
 
-        // 创建内存DC进行双缓冲绘制
         HDC memDC = CreateCompatibleDC(hdc);
         HBITMAP memBitmap = CreateCompatibleBitmap(hdc,
             clientRect.right - clientRect.left,
             clientRect.bottom - clientRect.top);
         HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
 
-        // 绘制黑色半透明背景
-        HBRUSH blackBrush = CreateSolidBrush(RGB(0, 0, 0));
-        FillRect(memDC, &clientRect, blackBrush);
-        DeleteObject(blackBrush);
+        int w = clientRect.right - clientRect.left;
+        int h = clientRect.bottom - clientRect.top;
+        int midX, midY;
 
-        // 设置文本颜色和模式
-        SetTextColor(memDC, RGB(255, 255, 255));
+        if (g_gridCustomCenter && !g_gridStack.empty()) {
+            // 将屏幕坐标转为窗口坐标
+            RECT sr = g_gridStack.back();
+            midX = g_gridCenter.x - sr.left;
+            midY = g_gridCenter.y - sr.top;
+            // 限制在窗口内
+            if (midX < 1) midX = 1;
+            if (midX >= w) midX = w - 1;
+            if (midY < 1) midY = 1;
+            if (midY >= h) midY = h - 1;
+        } else {
+            midX = w / 2;
+            midY = h / 2;
+        }
+
+        // 字体大小随窗口缩放
+        int fontSize = min(w, h) / 6;
+        if (fontSize < 12) fontSize = 12;
+        if (fontSize > 28) fontSize = 28;
+
+        EnsureGridResources(fontSize);
+
+        // 背景
+        FillRect(memDC, &clientRect, g_gridBgBrush);
         SetBkMode(memDC, TRANSPARENT);
-        HFONT font = CreateFont(
-            20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
-        HGDIOBJ oldFont = SelectObject(memDC, font);
 
-        // 绘制Grid线
-        HPEN pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
-        HPEN oldPen = (HPEN)SelectObject(memDC, pen);
+        // 十字线
+        HGDIOBJ oldPen = SelectObject(memDC, g_gridCrossPen);
+        MoveToEx(memDC, midX, 0, NULL); LineTo(memDC, midX, h);
+        MoveToEx(memDC, 0, midY, NULL); LineTo(memDC, w, midY);
 
-        // 计算当前显示区域的中心线
-        // 如果有区域栈，使用栈顶的区域；否则使用整个窗口区域
-        RECT currentRegion;
-        if (g_gridStack.empty()) {
-            currentRegion = clientRect;
-        }
-        else {
-            // 将屏幕坐标转换为窗口坐标
-            RECT topRegion = g_gridStack.back();
-            currentRegion.left = 0;
-            currentRegion.top = 0;
-            currentRegion.right = clientRect.right - clientRect.left;
-            currentRegion.bottom = clientRect.bottom - clientRect.top;
-        }
-
-        // 计算中心点（相对于当前窗口客户区）
-        int midX = (currentRegion.left + currentRegion.right) / 2;
-        int midY = (currentRegion.top + currentRegion.bottom) / 2;
-
-        // 绘制垂直线
-        MoveToEx(memDC, midX, 0, NULL);
-        LineTo(memDC, midX, currentRegion.bottom);
-
-        // 绘制水平线
-        MoveToEx(memDC, 0, midY, NULL);
-        LineTo(memDC, currentRegion.right, midY);
-
-        // 恢复画笔和字体并删除
+        // 对角线（从四角到中心点）
+        SelectObject(memDC, g_gridDiagPen);
+        MoveToEx(memDC, 0, 0, NULL); LineTo(memDC, midX, midY);
+        MoveToEx(memDC, w, 0, NULL); LineTo(memDC, midX, midY);
+        MoveToEx(memDC, 0, h, NULL); LineTo(memDC, midX, midY);
+        MoveToEx(memDC, w, h, NULL); LineTo(memDC, midX, midY);
         SelectObject(memDC, oldPen);
-        DeleteObject(pen);
+
+        // 方向键标签
+        HGDIOBJ oldFont = SelectObject(memDC, g_gridLabelFont);
+
+        // 标签偏向中心点（75% 靠近中心）
+        int lx = midX * 3 / 4;                      // 左半，靠近中心
+        int rx = midX + (w - midX) / 4;              // 右半，靠近中心
+        int ty = midY * 3 / 4;                       // 上半，靠近中心
+        int by = midY + (h - midY) / 4;              // 下半，靠近中心
+        struct { const char* key; int x; int y; COLORREF color; } labels[] = {
+            { "H", lx,   midY, RGB(50, 255, 120) },   // 左
+            { "L", rx,   midY, RGB(50, 255, 120) },   // 右
+            { "K", midX, ty,   RGB(80, 200, 255) },   // 上
+            { "J", midX, by,   RGB(80, 200, 255) },   // 下
+            { "U", lx,   ty,   RGB(200, 200, 100) },  // 左上
+            { "O", rx,   ty,   RGB(200, 200, 100) },  // 右上
+            { "N", lx,   by,   RGB(200, 200, 100) },  // 左下
+            { ".",  rx,   by,   RGB(200, 200, 100) },  // 右下
+        };
+
+        HBRUSH labelBg = CreateSolidBrush(RGB(0, 0, 0));
+        for (auto& lb : labels) {
+            RECT tr = { lb.x - fontSize / 2 - 2, lb.y - fontSize / 2 - 1,
+                        lb.x + fontSize / 2 + 2, lb.y + fontSize / 2 + 1 };
+            FillRect(memDC, &tr, labelBg);
+            SetTextColor(memDC, lb.color);
+            DrawTextA(memDC, lb.key, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        DeleteObject(labelBg);
+
         SelectObject(memDC, oldFont);
-        DeleteObject(font);
 
         // 将内存DC内容复制到实际DC
         BitBlt(hdc, 0, 0,
@@ -851,13 +1105,27 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
         HGDIOBJ oldFont = SelectObject(memDC, font);
 
+        // 交替背景色画刷（棋盘格区分边界）
+        HBRUSH darkBrush = CreateSolidBrush(RGB(15, 15, 25));
+        HBRUSH lightBrush = CreateSolidBrush(RGB(35, 35, 50));
+
         // 绘制所有hint字符
         for (int row = 0; row < 26; row++) {
             for (int col = 0; col < 26; col++) {
+                RECT cellRect = {
+                    col * blockWidth,
+                    row * blockHeight,
+                    (col + 1) * blockWidth,
+                    (row + 1) * blockHeight
+                };
+
+                // 棋盘格背景
+                FillRect(memDC, &cellRect, ((row + col) % 2) ? lightBrush : darkBrush);
+
                 // 如果是hint模式下第一个字母，只显示匹配列
                 if (g_currentHint.length() == 1) {
                     if (col != (g_currentHint[0] - 'A')) {
-                        continue; // 跳过不匹配的列
+                        continue;
                     }
                 }
 
@@ -866,16 +1134,11 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 hintText[1] = 'A' + row;
                 hintText[2] = '\0';
 
-                RECT textRect = {
-                    col * blockWidth,
-                    row * blockHeight,
-                    (col + 1) * blockWidth,
-                    (row + 1) * blockHeight
-                };
-
-                DrawTextA(memDC, hintText, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                DrawTextA(memDC, hintText, -1, &cellRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
         }
+        DeleteObject(darkBrush);
+        DeleteObject(lightBrush);
 
         // 恢复字体并删除
         SelectObject(memDC, oldFont);
@@ -954,39 +1217,98 @@ LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 }
 
 // 状态指示器窗口过程
+// 计算鼠标在 hint 网格中的坐标字母（如 "HK"）
+static void GetHintCoord(POINT mousePos, char* out) {
+    out[0] = '?'; out[1] = '?'; out[2] = '\0';
+    for (size_t i = 0; i < g_screenRects.size(); i++) {
+        if (PtInRect(&g_screenRects[i], mousePos)) {
+            const RECT& sr = g_screenRects[i];
+            int sw = sr.right - sr.left;
+            int sh = sr.bottom - sr.top;
+            int col = (mousePos.x - sr.left) * 26 / sw;
+            int row = (mousePos.y - sr.top) * 26 / sh;
+            if (col < 0) col = 0; if (col > 25) col = 25;
+            if (row < 0) row = 0; if (row > 25) row = 25;
+            out[0] = 'A' + col;
+            out[1] = 'A' + row;
+            return;
+        }
+    }
+}
+
+static HFONT g_coordFont = NULL;
+static HFONT g_coordFontBig = NULL;
+static HBRUSH g_coordBgBrush = NULL;
+void EndClickFlash();  // 前向声明
+
+#define TIMER_CLICK_FLASH 1001
+
 LRESULT CALLBACK IndicatorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
 
-        // 绘制方块，颜色根据鼠标按键状态决定
         RECT rect;
         GetClientRect(hwnd, &rect);
 
-        HBRUSH brush;
-        if (g_wheelMode) {
-            brush = CreateSolidBrush(RGB(0, 0, 255));  // 蓝色表示滚轮模式
-        }
-        else if (g_gridMode) {
-            brush = CreateSolidBrush(RGB(128, 0, 128));  // 紫色表示grid模式
-        }
-        else if (g_leftButtonDown) {
-            brush = CreateSolidBrush(RGB(0, 255, 0));  // 绿色
-        }
-        else if (g_rightButtonDown) {
-            brush = CreateSolidBrush(RGB(255, 255, 0));  // 黄色
-        }
-        else {
-            brush = CreateSolidBrush(RGB(255, 0, 0));  // 红色
+        if (!g_coordBgBrush) g_coordBgBrush = CreateSolidBrush(RGB(0, 0, 0));
+        if (!g_coordFont) g_coordFont = CreateFont(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+        if (!g_coordFontBig) g_coordFontBig = CreateFont(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+
+        FillRect(hdc, &rect, g_coordBgBrush);
+
+        POINT mousePos;
+        GetCursorPos(&mousePos);
+        char coord[3];
+        GetHintCoord(mousePos, coord);
+
+        SetBkMode(hdc, TRANSPARENT);
+        HGDIOBJ oldFont = SelectObject(hdc, g_clickFlash ? g_coordFontBig : g_coordFont);
+
+        // 分别绘制两个字母，不同颜色
+        char c1[2] = { coord[0], '\0' };
+        char c2[2] = { coord[1], '\0' };
+
+        if (g_clickFlash) {
+            // 点击闪烁：两个字母都变黄
+            SetTextColor(hdc, RGB(255, 230, 50));
+            DrawTextA(hdc, coord, 2, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        } else {
+            // 正常：左半绿，右半青
+            RECT r1 = rect;
+            r1.right = (rect.right - rect.left) / 2;
+            RECT r2 = rect;
+            r2.left = r1.right;
+
+            SetTextColor(hdc, RGB(50, 255, 120));   // 亮绿（列）
+            DrawTextA(hdc, c1, 1, &r1, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SetTextColor(hdc, RGB(255, 160, 40));   // 亮橙（行）
+            DrawTextA(hdc, c2, 1, &r2, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
 
-        FillRect(hdc, &rect, brush);
-        DeleteObject(brush);
-
+        SelectObject(hdc, oldFont);
         EndPaint(hwnd, &ps);
         break;
     }
+    case WM_USER + 200: {
+        // 移动线程请求更新位置 (wParam=x, lParam=y)
+        int cx = (int)wParam;
+        int cy = (int)lParam;
+        MoveWindow(hwnd, cx + 12, cy + 12, 22, 16, TRUE);
+        InvalidateRect(hwnd, NULL, TRUE);
+        break;
+    }
+    case WM_TIMER:
+        if (wParam == TIMER_CLICK_FLASH) {
+            KillTimer(hwnd, TIMER_CLICK_FLASH);
+            EndClickFlash();
+        }
+        break;
     default:
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
@@ -1005,40 +1327,41 @@ inline long DistanceSquared(POINT a, POINT b) {
 
 
 
-// 更新指示器位置
+// 触发点击状态显示
+void TriggerClickFlash() {
+    if (!g_indicatorWindow) return;
+    g_clickFlash = true;
+    POINT mousePos;
+    GetCursorPos(&mousePos);
+    MoveWindow(g_indicatorWindow, mousePos.x + 8, mousePos.y + 8, 30, 22, TRUE);
+    ShowWindow(g_indicatorWindow, SW_SHOW);
+    InvalidateRect(g_indicatorWindow, NULL, TRUE);
+}
+
+// 结束点击状态显示
+void EndClickFlash() {
+    if (!g_indicatorWindow) return;
+    g_clickFlash = false;
+    UpdateIndicatorPosition();
+}
+
+// 更新坐标指示器位置
 void UpdateIndicatorPosition() {
     if (g_indicatorWindow && g_isActive && !g_hintMode && !g_gridMode) {
-        // 获取当前鼠标位置
         POINT mousePos;
         GetCursorPos(&mousePos);
 
-
-        int width = 14;
-        int height = 6;
-        if (g_iskeyDown)
-        {
-            width = 6;
-            height = 14;
+        if (g_clickFlash) {
+            InvalidateRect(g_indicatorWindow, NULL, TRUE);
+        } else {
+            // SetWindowPos 同时更新位置和 Z-order，确保在任务栏之上
+            SetWindowPos(g_indicatorWindow, HWND_TOPMOST,
+                mousePos.x + 12, mousePos.y + 12, 22, 16,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            InvalidateRect(g_indicatorWindow, NULL, TRUE);
         }
-        width *= g_dotSize;
-        height *= g_dotSize;
-        // 将指示器移动到鼠标位置附近（稍微偏移一点，避免遮挡）
-        MoveWindow(
-            g_indicatorWindow,
-            mousePos.x + 10 - g_dotSize * 4,  // 在鼠标右下方
-            mousePos.y + 10 - g_dotSize * 4,
-            width, height,  // 8x8像素
-            TRUE
-        );
-
-        // 确保可见
-        ShowWindow(g_indicatorWindow, SW_SHOW);
-
-        // 触发重绘以更新颜色
-        InvalidateRect(g_indicatorWindow, NULL, TRUE);
     }
     else if (g_indicatorWindow) {
-        // 如果不激活或在hint模式/grid模式下则隐藏指示器
         ShowWindow(g_indicatorWindow, SW_HIDE);
     }
 }
@@ -1251,13 +1574,13 @@ void CreateIndicatorWindow() {
 
     RegisterClassEx(&wc);
 
-    // 创建指示器窗口，初始时隐藏
+    // 创建坐标指示器窗口（显示 hint 坐标字母）
     g_indicatorWindow = CreateWindowEx(
-        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,  // 置顶且支持透明
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
         L"IndicatorWndClass",
         NULL,
         WS_POPUP,
-        0, 0, 8, 8,  // 8x8像素的红色方块
+        0, 0, 22, 16,  // 22x16 显示两个字母
         NULL,
         NULL,
         GetModuleHandle(NULL),
@@ -1340,8 +1663,8 @@ void ExitHintMode(bool isShowSubGrid = true) {
     g_lastSetSpeed = 15;
 
     if (isShowSubGrid) {
-        // 在鼠标当前位置进入Grid模式，创建180x100的子grid区域
-        //EnterGridModeFromCurrentPos();
+        g_miniGridMode = true;
+        EnterGridModeFromCurrentPos();
     }
 }
 
@@ -1355,20 +1678,21 @@ void ExitWheelMode() {
     UpdateIndicatorPosition();
 }
 
-// 进入grid模式（以当前鼠标位置为中心创建180x100区域）
+// 进入grid模式（以当前鼠标位置为中心，大小匹配hint格子）
 void EnterGridModeFromCurrentPos() {
-    if (g_gridMode) return;  // 已经在grid模式中
+    if (g_gridMode) return;
 
     g_gridMode = true;
     g_gridStack.clear();
 
-    // 获取当前鼠标位置
     POINT currentPos;
     GetCursorPos(&currentPos);
 
-    // 创建一个180x100的区域，以当前鼠标位置为中心
-    int regionWidth = 180;
-    int regionHeight = 100;
+    // 根据当前屏幕计算 hint 格子大小
+    int screenIdx = GetCurrentScreenIndex();
+    const RECT& sr = g_screenRects[screenIdx];
+    int regionWidth = (sr.right - sr.left) / 26;
+    int regionHeight = (sr.bottom - sr.top) / 26;
     RECT region = {
         currentPos.x - regionWidth / 2,
         currentPos.y - regionHeight / 2,
@@ -1441,6 +1765,8 @@ void ExitGridMode() {
     if (!g_gridMode) return;
 
     g_gridMode = false;
+    g_miniGridMode = false;
+    g_gridCustomCenter = false;
     g_gridStack.clear();
 
     ShowWindow(g_gridWindow, SW_HIDE);
@@ -1454,12 +1780,23 @@ void ExitGridMode() {
 void MoveToGridArea(int direction) {
     if (g_gridStack.empty()) return;
 
-    // 获取当前区域
     RECT currentRect = g_gridStack.back();
 
-    // 计算四个子区域
-    int midX = currentRect.left + (currentRect.right - currentRect.left) / 2;
-    int midY = currentRect.top + (currentRect.bottom - currentRect.top) / 2;
+    int midX, midY;
+    if (g_gridCustomCenter) {
+        midX = g_gridCenter.x;
+        midY = g_gridCenter.y;
+        // 限制在区域内
+        if (midX < currentRect.left) midX = currentRect.left;
+        if (midX > currentRect.right) midX = currentRect.right;
+        if (midY < currentRect.top) midY = currentRect.top;
+        if (midY > currentRect.bottom) midY = currentRect.bottom;
+        // 使用一次后恢复默认中心
+        g_gridCustomCenter = false;
+    } else {
+        midX = currentRect.left + (currentRect.right - currentRect.left) / 2;
+        midY = currentRect.top + (currentRect.bottom - currentRect.top) / 2;
+    }
 
     RECT newRect;
     int centerX, centerY;
@@ -1506,6 +1843,7 @@ void MoveToGridArea(int direction) {
     );
 
     ShowWindow(g_gridWindow, SW_SHOW);
+    InvalidateRect(g_gridWindow, NULL, TRUE);
     UpdateWindow(g_gridWindow);
 }
 
@@ -1513,12 +1851,21 @@ void MoveToGridArea(int direction) {
 void MoveToGridCorner(int corner) {
     if (g_gridStack.empty()) return;
 
-    // 获取当前区域
     RECT currentRect = g_gridStack.back();
 
-    // 计算四个角落区域
-    int midX = currentRect.left + (currentRect.right - currentRect.left) / 2;
-    int midY = currentRect.top + (currentRect.bottom - currentRect.top) / 2;
+    int midX, midY;
+    if (g_gridCustomCenter) {
+        midX = g_gridCenter.x;
+        midY = g_gridCenter.y;
+        if (midX < currentRect.left) midX = currentRect.left;
+        if (midX > currentRect.right) midX = currentRect.right;
+        if (midY < currentRect.top) midY = currentRect.top;
+        if (midY > currentRect.bottom) midY = currentRect.bottom;
+        g_gridCustomCenter = false;
+    } else {
+        midX = currentRect.left + (currentRect.right - currentRect.left) / 2;
+        midY = currentRect.top + (currentRect.bottom - currentRect.top) / 2;
+    }
 
     RECT newRect;
     int centerX, centerY;
@@ -1565,6 +1912,7 @@ void MoveToGridCorner(int corner) {
     );
 
     ShowWindow(g_gridWindow, SW_SHOW);
+    InvalidateRect(g_gridWindow, NULL, TRUE);
     UpdateWindow(g_gridWindow);
 }
 
@@ -1803,27 +2151,38 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         if (g_gridMode) {
             if (isKeyDown) {
                 switch (vkCode) {
-                case 'H':  // 左半边区域 (左上 + 左下)
-                case 'J':  // 下半边区域 (左下 + 右下)
-                case 'K':  // 上半边区域 (左上 + 右上)
-                case 'L':  // 右半边区域 (右上 + 右下)
-                    // 修改：在Grid模式下按HJKL键直接退出Grid模式
-                    ExitGridMode();
+                case 'H':  // 左半（vim: 左）
+                case 'J':  // 下半（vim: 下）
+                case 'K':  // 上半（vim: 上）
+                case 'L':  // 右半（vim: 右）
+                    MoveToGridArea(vkCode);
+                    if (g_miniGridMode) { g_miniGridMode = false; ExitGridMode(); }
                     return 1;
-                    //return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让HJKL键正常工作
-                case 'Q':  // 左上角区域
-                case 'W':  // 右上角区域
-                case 'A':  // 左下角区域
-                case 'S':  // 右下角区域
-                    MoveToGridCorner(vkCode);
-                    return 1;  // 阻止其他程序接收到这些按键
+                case 'U':  // 左上角（对角键）
+                    MoveToGridCorner('Q');
+                    if (g_miniGridMode) { g_miniGridMode = false; ExitGridMode(); }
+                    return 1;
+                case 'O':  // 右上角（对角键）
+                    MoveToGridCorner('W');
+                    if (g_miniGridMode) { g_miniGridMode = false; ExitGridMode(); }
+                    return 1;
+                case 'N':  // 左下角（对角键）
+                    MoveToGridCorner('A');
+                    if (g_miniGridMode) { g_miniGridMode = false; ExitGridMode(); }
+                    return 1;
+                case VK_OEM_PERIOD:  // 右下角（对角键 .）
+                    MoveToGridCorner('S');
+                    if (g_miniGridMode) { g_miniGridMode = false; ExitGridMode(); }
+                    return 1;
                 case 'R':  // 返回上一个区域
                     ReturnToPreviousGrid();
                     return 1;
-                case 'I':  // 退出grid模式
-                case VK_ESCAPE:  // 退出grid模式
+                case 'I':  // 退出grid模式（拦截，不传递）
                     ExitGridMode();
-                    return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);  // 让Esc正常工作
+                    return 1;
+                case VK_ESCAPE:  // 退出grid模式（Esc 传递给系统）
+                    ExitGridMode();
+                    return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                 case 'T':
                  
                     // 退出Grid模式
@@ -2084,52 +2443,36 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 }
 
                 switch (vkCode) {
-                case 'H':  // 左移（Shift+H = 水平左滚）
+                case 'H':  // 左移（Shift = 精确1像素）
                     if (g_ctrlPressed) {
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
-                    }
-                    if (g_shiftPressed) {
-                        mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -g_wheelSpeed, 0);
-                        return 1;
                     }
                     g_hPressed = true;
                     g_lastActionWasC = false;
                     StartSmoothMove();
                     UpdateIndicatorPosition();
                     break;
-                case 'J':  // 下移（Shift+J = 向下滚动）
+                case 'J':  // 下移（Shift = 精确1像素）
                     if (g_ctrlPressed) {
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
-                    }
-                    if (g_shiftPressed) {
-                        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -g_wheelSpeed, 0);
-                        return 1;
                     }
                     g_jPressed = true;
                     g_lastActionWasC = false;
                     StartSmoothMove();
                     UpdateIndicatorPosition();
                     break;
-                case 'K':  // 上移（Shift+K = 向上滚动）
+                case 'K':  // 上移（Shift = 精确1像素）
                     if (g_ctrlPressed) {
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
-                    }
-                    if (g_shiftPressed) {
-                        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, g_wheelSpeed, 0);
-                        return 1;
                     }
                     g_kPressed = true;
                     g_lastActionWasC = false;
                     StartSmoothMove();
                     UpdateIndicatorPosition();
                     break;
-                case 'L':  // 右移（Shift+L = 水平右滚）
+                case 'L':  // 右移（Shift = 精确1像素）
                     if (g_ctrlPressed) {
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
-                    }
-                    if (g_shiftPressed) {
-                        mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, g_wheelSpeed, 0);
-                        return 1;
                     }
                     g_lPressed = true;
                     g_lastActionWasC = false;
@@ -2196,14 +2539,35 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     }
                     break;
 
-                    // Grid模式
+                    // Grid模式（第一次i=鼠标位置grid，grid中再按i=屏幕中心grid）
                 case 'I':
                     if (g_ctrlPressed) {
-                        // 如果I键是和Ctrl一起按下的，不执行I键功能，直接传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
-                    EnterGridMode();
-                    g_lastActionWasC = false;  // 重置C键状态
+                    if (g_gridMode) {
+                        // 已在 grid 中：切换到屏幕中心 grid
+                        ExitGridMode();
+                        EnterGridMode();
+                    } else {
+                        // 进入鼠标位置 grid
+                        g_gridMode = true;
+                        g_gridStack.clear();
+                        int si = GetCurrentScreenIndex();
+                        if (si >= 0 && si < (int)g_screenRects.size()) {
+                            RECT sr = g_screenRects[si];
+                            g_gridStack.push_back(sr);
+                            // 记录鼠标位置为自定义中心
+                            GetCursorPos(&g_gridCenter);
+                            g_gridCustomCenter = true;
+                            MoveWindow(g_gridWindow, sr.left, sr.top,
+                                sr.right - sr.left, sr.bottom - sr.top, TRUE);
+                            ShowWindow(g_gridWindow, SW_SHOW);
+                            InvalidateRect(g_gridWindow, NULL, TRUE);
+                            UpdateWindow(g_gridWindow);
+                        }
+                        if (g_indicatorWindow) ShowWindow(g_indicatorWindow, SW_HIDE);
+                    }
+                    g_lastActionWasC = false;
                     break;
 
                     // 标签功能
@@ -2245,11 +2609,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 鼠标点击
                 case 'F':  // 左键点击（支持 Shift+F = Shift+Click, 保留 Ctrl+Click 传递）
                     if (!g_leftButtonDown) {
-                        // 按住 Shift 时模拟 Shift+Click
                         if (g_shiftPressed) keybd_event(VK_SHIFT, 0, 0, 0);
                         g_leftButtonDown = true;
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                        UpdateIndicatorPosition();
+                        TriggerClickFlash();
                         AddMousePositionToStack();
                         if (g_shiftPressed) keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
                         g_lastActionWasC = false;
@@ -2258,20 +2621,21 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     break;
                 case 'G':  // 右键点击
                     g_rightButtonDown = true;
-                    UpdateIndicatorPosition();
                     mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
                     g_rightButtonDown = false;
-                    UpdateIndicatorPosition();
+                    TriggerClickFlash();
+                    SetTimer(g_indicatorWindow, TIMER_CLICK_FLASH, 300, NULL);
                     g_lastActionWasC = false;
                     break;
                 case 'B':  // 中键点击
                     mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
                     std::this_thread::sleep_for(std::chrono::milliseconds(30));
                     mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+                    TriggerClickFlash();
+                    SetTimer(g_indicatorWindow, TIMER_CLICK_FLASH, 300, NULL);
                     g_lastActionWasC = false;
-                    UpdateIndicatorPosition();
                     break;
 
                     // 拖动控制
@@ -2438,8 +2802,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     {
                         g_leftButtonDown = false;
                         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                        UpdateIndicatorPosition();
-
+                        EndClickFlash();
                     }
                     break;
                 default:
@@ -2600,6 +2963,8 @@ static void ShowTrayMenu(HWND hwnd) {
         zh ? L"\u542F\u7528\u952E\u76D8\u63A7\u5236" : L"Enable Keyboard Control");
     AppendMenu(hMenu, MF_STRING, IDM_TRAY_HELP,
         zh ? L"\u64CD\u4F5C\u6307\u5357" : L"Quick Guide");
+    AppendMenu(hMenu, g_helpVisible ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_HELPWIN,
+        zh ? L"\u60AC\u6D6E\u5E2E\u52A9" : L"Help Overlay");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_TRAY_EXIT,
         zh ? L"\u9000\u51FA" : L"Exit");
@@ -2621,8 +2986,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 创建hint窗口
         CreateHintWindow();
 
-        // 创建指示器窗口
+        // 创建坐标指示器窗口（显示 hint 坐标字母）
         CreateIndicatorWindow();
+
+        // 创建帮助悬浮窗
+        CreateHelpWindow();
 
         // 加载标签配置
         LoadTagsFromConfig();
@@ -2661,6 +3029,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case IDM_TRAY_HELP:
             ShowHelpDialog(hwnd);
             break;
+        case IDM_TRAY_HELPWIN:
+            ToggleHelpWindow();
+            break;
         case IDM_TRAY_EXIT:
             DestroyWindow(hwnd);
             break;
@@ -2690,6 +3061,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 销毁指示器窗口
         if (g_indicatorWindow) {
             DestroyWindow(g_indicatorWindow);
+        }
+        // 销毁帮助窗口
+        if (g_helpWindow) {
+            DestroyWindow(g_helpWindow);
         }
         // 销毁所有标签窗口
         for (auto& tag : g_tags) {
