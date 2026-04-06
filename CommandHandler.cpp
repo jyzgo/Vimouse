@@ -1,9 +1,5 @@
 #include "CommandHandler.h"
-#include "WindowQuery.h"
-#include "UIAutomation.h"
-#include "ScreenOCR.h"
 #include <sstream>
-#include <fstream>
 #include <thread>
 #include <chrono>
 
@@ -38,6 +34,86 @@ static void DoMouseClick(int x, int y, bool move, DWORD downFlag, DWORD upFlag) 
     mouse_event(upFlag, 0, 0, 0, 0);
 }
 
+// 辅助：解析按键名 -> VK code
+static WORD NameToVK(const std::string& name) {
+    if (name == "enter" || name == "return") return VK_RETURN;
+    if (name == "tab") return VK_TAB;
+    if (name == "escape" || name == "esc") return VK_ESCAPE;
+    if (name == "backspace" || name == "bs") return VK_BACK;
+    if (name == "delete" || name == "del") return VK_DELETE;
+    if (name == "space") return VK_SPACE;
+    if (name == "up") return VK_UP;
+    if (name == "down") return VK_DOWN;
+    if (name == "left") return VK_LEFT;
+    if (name == "right") return VK_RIGHT;
+    if (name == "home") return VK_HOME;
+    if (name == "end") return VK_END;
+    if (name == "pageup" || name == "pgup") return VK_PRIOR;
+    if (name == "pagedown" || name == "pgdn") return VK_NEXT;
+    if (name == "insert" || name == "ins") return VK_INSERT;
+    if (name == "f1") return VK_F1;
+    if (name == "f2") return VK_F2;
+    if (name == "f3") return VK_F3;
+    if (name == "f4") return VK_F4;
+    if (name == "f5") return VK_F5;
+    if (name == "f6") return VK_F6;
+    if (name == "f7") return VK_F7;
+    if (name == "f8") return VK_F8;
+    if (name == "f9") return VK_F9;
+    if (name == "f10") return VK_F10;
+    if (name == "f11") return VK_F11;
+    if (name == "f12") return VK_F12;
+    if (name == "ctrl") return VK_CONTROL;
+    if (name == "alt") return VK_MENU;
+    if (name == "shift") return VK_SHIFT;
+    if (name == "win") return VK_LWIN;
+    // 单字符
+    if (name.size() == 1) {
+        char c = (char)toupper(name[0]);
+        if (c >= 'A' && c <= 'Z') return (WORD)c;
+        if (c >= '0' && c <= '9') return (WORD)c;
+    }
+    return 0;
+}
+
+// 辅助：模拟按键（支持组合键如 ctrl+c）
+static void SimulateKeyCombo(const std::string& combo) {
+    // 按 '+' 分割
+    std::vector<std::string> keys;
+    std::istringstream iss(combo);
+    std::string part;
+    while (std::getline(iss, part, '+')) {
+        // 转小写
+        std::string lower;
+        for (char c : part) lower += (char)tolower(c);
+        keys.push_back(lower);
+    }
+
+    // 按下修饰键
+    std::vector<WORD> modifiers;
+    for (size_t i = 0; i + 1 < keys.size(); i++) {
+        WORD vk = NameToVK(keys[i]);
+        if (vk) {
+            keybd_event((BYTE)vk, 0, 0, 0);
+            modifiers.push_back(vk);
+        }
+    }
+
+    // 按下并释放主键
+    if (!keys.empty()) {
+        WORD vk = NameToVK(keys.back());
+        if (vk) {
+            keybd_event((BYTE)vk, 0, 0, 0);
+            keybd_event((BYTE)vk, 0, KEYEVENTF_KEYUP, 0);
+        }
+    }
+
+    // 释放修饰键（逆序）
+    for (int i = (int)modifiers.size() - 1; i >= 0; i--) {
+        keybd_event((BYTE)modifiers[i], 0, KEYEVENTF_KEYUP, 0);
+    }
+}
+
 std::string HandleCommand(const std::string& command) {
     auto parts = SplitCommand(command);
     if (parts.empty()) {
@@ -56,7 +132,7 @@ std::string HandleCommand(const std::string& command) {
         return "OK";
     }
 
-    // click [x y] [button]
+    // click [x y]
     if (cmd == "click") {
         int x, y;
         bool hasPos = false;
@@ -113,7 +189,6 @@ std::string HandleCommand(const std::string& command) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
 
-        // 平滑拖拽
         int steps = duration / 10;
         if (steps < 1) steps = 1;
         for (int i = 1; i <= steps; i++) {
@@ -132,7 +207,7 @@ std::string HandleCommand(const std::string& command) {
         if (parts.size() < 2) return "ERR scroll requires direction";
         int amount = 3;
         if (parts.size() >= 3) ParseInt(parts[2], amount);
-        int delta = amount * 120; // WHEEL_DELTA = 120
+        int delta = amount * 120;
 
         if (parts[1] == "up") {
             mouse_event(MOUSEEVENTF_WHEEL, 0, 0, delta, 0);
@@ -148,14 +223,47 @@ std::string HandleCommand(const std::string& command) {
         return "OK";
     }
 
-    // pos - 返回当前鼠标位置
+    // pos
     if (cmd == "pos") {
         POINT p;
         GetCursorPos(&p);
         return "OK " + std::to_string(p.x) + " " + std::to_string(p.y);
     }
 
-    // tags - 列出所有标签
+    // keypress <combo> - 模拟组合键，如 keypress ctrl+c, keypress alt+f4, keypress enter
+    if (cmd == "keypress") {
+        if (parts.size() < 2) return "ERR keypress requires key combo (e.g. ctrl+c)";
+        SimulateKeyCombo(parts[1]);
+        return "OK";
+    }
+
+    // type <text> - 模拟输入文本（支持 UTF-8）
+    if (cmd == "type") {
+        if (parts.size() < 2) return "ERR type requires text";
+        // 拼接所有参数（保留空格）
+        std::string text;
+        for (size_t i = 1; i < parts.size(); i++) {
+            if (i > 1) text += " ";
+            text += parts[i];
+        }
+        // 转为宽字符并逐个发送
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, NULL, 0);
+        if (wlen <= 0) return "ERR invalid text";
+        std::vector<wchar_t> wtext(wlen);
+        MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+        for (int i = 0; i < wlen - 1; i++) {
+            INPUT input = {};
+            input.type = INPUT_KEYBOARD;
+            input.ki.wScan = wtext[i];
+            input.ki.dwFlags = KEYEVENTF_UNICODE;
+            SendInput(1, &input, sizeof(INPUT));
+            input.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            SendInput(1, &input, sizeof(INPUT));
+        }
+        return "OK";
+    }
+
+    // tags
     if (cmd == "tags") {
         std::string result = "OK [";
         for (size_t i = 0; i < g_tags.size(); i++) {
@@ -196,152 +304,67 @@ std::string HandleCommand(const std::string& command) {
         return "OK";
     }
 
-    // 窗口查询命令
-    if (cmd == "get_active_window") {
-        return "OK " + GetActiveWindowInfo();
-    }
-
-    if (cmd == "list_windows") {
-        return "OK " + ListWindows();
-    }
-
-    // find_window <title_contains>
-    if (cmd == "find_window") {
-        if (parts.size() < 2) return "ERR find_window requires title";
-        // 拼接后续所有部分作为搜索关键字
-        std::string title;
-        for (size_t i = 1; i < parts.size(); i++) {
-            if (i > 1) title += " ";
-            title += parts[i];
+    // mclick [x y] - 中键点击
+    if (cmd == "mclick") {
+        int x, y;
+        bool hasPos = false;
+        if (parts.size() >= 3 && ParseInt(parts[1], x) && ParseInt(parts[2], y)) {
+            hasPos = true;
+        } else {
+            POINT p; GetCursorPos(&p);
+            x = p.x; y = p.y;
         }
-        return FindWindow(title);
-    }
-
-    // wait_window <title_contains> [timeout_ms]
-    if (cmd == "wait_window") {
-        if (parts.size() < 2) return "ERR wait_window requires title";
-        int timeout = 30000;
-        // 最后一个参数可能是数字(timeout)
-        std::string title;
-        size_t titleEnd = parts.size();
-        if (parts.size() >= 3) {
-            int t;
-            if (ParseInt(parts.back(), t)) {
-                timeout = t;
-                titleEnd = parts.size() - 1;
-            }
+        if (hasPos) {
+            SetCursorPos(x, y);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        for (size_t i = 1; i < titleEnd; i++) {
-            if (i > 1) title += " ";
-            title += parts[i];
-        }
-        return WaitForWindow(title, timeout);
+        mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+        return "OK";
     }
 
-    // UI Automation 命令
-    // find_element <name> [type]
-    if (cmd == "find_element") {
-        if (parts.size() < 2) return "ERR find_element requires name";
-        std::string name = parts[1];
-        std::string type = parts.size() >= 3 ? parts[2] : "";
-        return FindUIElement(name, type);
+    // status - 返回当前状态
+    if (cmd == "status") {
+        POINT p;
+        GetCursorPos(&p);
+        std::string result = "OK {\"active\":" + std::string(g_isActive ? "true" : "false");
+        result += ",\"x\":" + std::to_string(p.x);
+        result += ",\"y\":" + std::to_string(p.y) + "}";
+        return result;
     }
 
-    // list_elements [hwnd_hex] [depth]
-    if (cmd == "list_elements") {
-        HWND hwnd = GetForegroundWindow();
-        int depth = 2;
-        if (parts.size() >= 2) {
-            unsigned long long h = std::stoull(parts[1], nullptr, 16);
-            hwnd = (HWND)h;
-        }
-        if (parts.size() >= 3) ParseInt(parts[2], depth);
-        return ListUIElements(hwnd, depth);
+    // activate - 激活 Vimouse 键盘控制
+    if (cmd == "activate") {
+        g_isActive = true;
+        return "OK";
     }
 
-    // click_element <name> [type]
-    if (cmd == "click_element") {
-        if (parts.size() < 2) return "ERR click_element requires name";
-        std::string name = parts[1];
-        std::string type = parts.size() >= 3 ? parts[2] : "";
-        return ClickUIElement(name, type);
+    // deactivate - 停用 Vimouse 键盘控制
+    if (cmd == "deactivate") {
+        g_isActive = false;
+        return "OK";
     }
 
-    // OCR 命令
-    // scan_region x1 y1 x2 y2
-    if (cmd == "scan_region") {
-        if (parts.size() < 5) return "ERR scan_region requires x1 y1 x2 y2";
-        int x1, y1, x2, y2;
-        if (!ParseInt(parts[1], x1) || !ParseInt(parts[2], y1) ||
-            !ParseInt(parts[3], x2) || !ParseInt(parts[4], y2))
-            return "ERR invalid coordinates";
-        return ScanRegion(x1, y1, x2, y2);
-    }
-
-    // read_at [x y] [width height]
-    if (cmd == "read_at") {
-        if (parts.size() >= 3) {
-            int x, y, w = 300, h = 60;
-            if (!ParseInt(parts[1], x) || !ParseInt(parts[2], y))
-                return "ERR invalid coordinates";
-            if (parts.size() >= 5) {
-                ParseInt(parts[3], w);
-                ParseInt(parts[4], h);
-            }
-            return ReadAt(x, y, w, h);
-        }
-        return ReadAtCursor();
-    }
-
-    // screenshot [grid] [quality]
-    // 截取鼠标所在屏幕，可选叠加坐标网格
-    if (cmd == "screenshot") {
-        bool grid = false;
-        int quality = 70;
-        for (size_t i = 1; i < parts.size(); i++) {
-            if (parts[i] == "grid") grid = true;
-            else { int q; if (ParseInt(parts[i], q)) quality = q; }
-        }
-        return CaptureCurrentScreen(quality, grid);
-    }
-
-    // grid_click <label> [action] - 点击网格坐标 (如 "HF")
-    // action: click(默认), rclick, dclick
-    if (cmd == "grid_click") {
-        if (parts.size() < 2 || parts[1].size() != 2) return "ERR grid_click requires 2-letter label (e.g. HF)";
-        int col = toupper(parts[1][0]) - 'A';
-        int row = toupper(parts[1][1]) - 'A';
-        if (col < 0 || col >= 26 || row < 0 || row >= 14) return "ERR invalid grid label";
-
-        // 获取鼠标所在屏幕
-        POINT cursorPos;
-        GetCursorPos(&cursorPos);
-        HMONITOR hMon = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTOPRIMARY);
+    // screen - 返回屏幕信息
+    if (cmd == "screen") {
+        POINT p;
+        GetCursorPos(&p);
+        HMONITOR hMon = MonitorFromPoint(p, MONITOR_DEFAULTTOPRIMARY);
         MONITORINFO mi = { sizeof(mi) };
         GetMonitorInfo(hMon, &mi);
+        int w = mi.rcMonitor.right - mi.rcMonitor.left;
+        int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        std::string result = "OK {\"width\":" + std::to_string(w);
+        result += ",\"height\":" + std::to_string(h);
+        result += ",\"left\":" + std::to_string(mi.rcMonitor.left);
+        result += ",\"top\":" + std::to_string(mi.rcMonitor.top) + "}";
+        return result;
+    }
 
-        int screenW = mi.rcMonitor.right - mi.rcMonitor.left;
-        int screenH = mi.rcMonitor.bottom - mi.rcMonitor.top;
-        float cellW = (float)screenW / 26;
-        float cellH = (float)screenH / 14;
-
-        int x = mi.rcMonitor.left + (int)(col * cellW + cellW / 2);
-        int y = mi.rcMonitor.top + (int)(row * cellH + cellH / 2);
-
-        std::string action = parts.size() >= 3 ? parts[2] : "click";
-        SetCursorPos(x, y);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-        if (action == "rclick") {
-            DoMouseClick(x, y, false, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP);
-        } else if (action == "dclick") {
-            DoMouseClick(x, y, false, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            DoMouseClick(x, y, false, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
-        } else {
-            DoMouseClick(x, y, false, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
-        }
-        return "OK " + std::to_string(x) + " " + std::to_string(y);
+    // help - 列出所有可用命令
+    if (cmd == "help") {
+        return "OK commands: move click rclick dclick mclick drag scroll pos keypress type tags tag sleep status activate deactivate screen help";
     }
 
     return "ERR unknown command: " + cmd;

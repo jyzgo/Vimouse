@@ -1,7 +1,6 @@
 ﻿#include "Common.h"
 #include "PipeServer.h"
-#include "UIAutomation.h"
-#include "HttpServer.h"
+#include "Resource.h"
 #include <shlobj.h>
 #include <shellapi.h>
 #include <iostream>
@@ -41,6 +40,7 @@ bool g_iskeyDown = false;
 bool g_ctrlPressed = false;  // 跟踪Ctrl键状态
 bool g_altPressed = false;
 bool g_winPressed = false;   // 跟踪Win键状态
+bool g_shiftPressed = false; // 跟踪Shift键状态
 
 // 平滑移动相关变量
 bool g_hPressed = false;
@@ -75,6 +75,112 @@ char g_nextLetter = 'A';  // 下一个要使用的字母
 bool g_tagMode = false;  // 是否处于tag模式
 bool g_editTagMode = false;
 int g_tagTabIndex = 1;
+
+// 自定义光标
+static HCURSOR g_cursorIdle = NULL;     // Vimouse 待机光标（绿色十字准星）
+static HCURSOR g_cursorMoving = NULL;   // 按下移动键时的光标（橙色实心圆点）
+
+static HCURSOR CreateCrosshairCursor(BYTE r, BYTE g, BYTE b, BYTE centerR, BYTE centerG, BYTE centerB) {
+    const int size = 32;
+    const int hot = 15;
+
+    HDC screenDC = GetDC(NULL);
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = size;
+    bmi.bmiHeader.biHeight = -size;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    DWORD* pixels = nullptr;
+    HBITMAP hColor = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, (void**)&pixels, NULL, 0);
+    if (!hColor || !pixels) { ReleaseDC(NULL, screenDC); return NULL; }
+
+    memset(pixels, 0, size * size * 4);
+
+    auto setPixel = [&](int x, int y, BYTE pr, BYTE pg, BYTE pb, BYTE pa) {
+        if (x >= 0 && x < size && y >= 0 && y < size)
+            pixels[y * size + x] = (pa << 24) | (pr << 16) | (pg << 8) | pb;
+    };
+
+    int cx = hot, cy = hot;
+
+    // 十字线 (中间留空)
+    for (int dx = -10; dx <= 10; dx++) {
+        if (dx >= -2 && dx <= 2) continue;
+        setPixel(cx + dx, cy, r, g, b, 255);
+        setPixel(cx + dx, cy - 1, 0, 0, 0, 140);
+        setPixel(cx + dx, cy + 1, 0, 0, 0, 140);
+    }
+    for (int dy = -10; dy <= 10; dy++) {
+        if (dy >= -2 && dy <= 2) continue;
+        setPixel(cx, cy + dy, r, g, b, 255);
+        setPixel(cx - 1, cy + dy, 0, 0, 0, 140);
+        setPixel(cx + 1, cy + dy, 0, 0, 0, 140);
+    }
+
+    // 中心点（3x3 实心）
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            setPixel(cx + dx, cy + dy, centerR, centerG, centerB, 255);
+
+    // Mask
+    HBITMAP hMask = CreateBitmap(size, size, 1, 1, NULL);
+    HDC maskDC = CreateCompatibleDC(screenDC);
+    SelectObject(maskDC, hMask);
+    PatBlt(maskDC, 0, 0, size, size, WHITENESS);
+    for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+            if ((pixels[y * size + x] >> 24) > 0)
+                SetPixel(maskDC, x, y, RGB(0, 0, 0));
+    DeleteDC(maskDC);
+
+    ICONINFO ii = {};
+    ii.fIcon = FALSE;
+    ii.xHotspot = hot;
+    ii.yHotspot = hot;
+    ii.hbmMask = hMask;
+    ii.hbmColor = hColor;
+    HCURSOR hCur = (HCURSOR)CreateIconIndirect(&ii);
+
+    DeleteObject(hColor);
+    DeleteObject(hMask);
+    ReleaseDC(NULL, screenDC);
+    return hCur;
+}
+
+static void InitCustomCursors() {
+    if (!g_cursorIdle)
+        g_cursorIdle = CreateCrosshairCursor(0, 220, 120, 255, 60, 60);     // 绿色准星 + 红中心
+    if (!g_cursorMoving)
+        g_cursorMoving = CreateCrosshairCursor(255, 160, 0, 255, 255, 0);   // 橙色准星 + 黄中心
+}
+
+#ifndef OCR_NORMAL
+#define OCR_NORMAL 32512
+#endif
+
+static void ApplyCursor(HCURSOR cursor) {
+    if (cursor) {
+        HCURSOR copy = CopyCursor(cursor);
+        SetSystemCursor(copy, OCR_NORMAL);
+    }
+}
+
+static void SetVimouseCursor() {
+    InitCustomCursors();
+    ApplyCursor(g_cursorIdle);
+}
+
+static void SetMovingCursor() {
+    InitCustomCursors();
+    ApplyCursor(g_cursorMoving);
+}
+
+static void RestoreSystemCursor() {
+    SystemParametersInfo(SPI_SETCURSORS, 0, NULL, 0);
+}
 
 // 函数声明
 void UpdateNextLetter();
@@ -417,55 +523,36 @@ void SmoothMoveThread() {
         int newY = currentPos.y;
         bool moved = false;
 
-        // 检查是否需要加速
-        if (g_hPressed || g_jPressed || g_kPressed || g_lPressed || g_uPressed || g_oPressed || g_nPressed || g_dotPressed) {
-            // 动态加速：每5ms增加速度
-            if (GetTickCount() - accelerationStartTime > 5) { // 每5ms加速一次
-                g_mouseSpeed += g_acceleratedSpeed;
-                if (g_mouseSpeed > g_maxSpeed) {
-                    g_mouseSpeed = g_maxSpeed;
+        // Shift 按下时精确模式：1像素移动，不加速
+        if (g_shiftPressed) {
+            if (g_hPressed) { newX -= 1; moved = true; }
+            if (g_jPressed) { newY += 1; moved = true; }
+            if (g_kPressed) { newY -= 1; moved = true; }
+            if (g_lPressed) { newX += 1; moved = true; }
+            if (g_uPressed) { newX -= 1; newY -= 1; moved = true; }
+            if (g_oPressed) { newX += 1; newY -= 1; moved = true; }
+            if (g_nPressed) { newX -= 1; newY += 1; moved = true; }
+            if (g_dotPressed) { newX += 1; newY += 1; moved = true; }
+        } else {
+            // 正常模式：动态加速
+            if (g_hPressed || g_jPressed || g_kPressed || g_lPressed || g_uPressed || g_oPressed || g_nPressed || g_dotPressed) {
+                if (GetTickCount() - accelerationStartTime > 5) {
+                    g_mouseSpeed += g_acceleratedSpeed;
+                    if (g_mouseSpeed > g_maxSpeed) {
+                        g_mouseSpeed = g_maxSpeed;
+                    }
+                    accelerationStartTime = GetTickCount();
                 }
-                accelerationStartTime = GetTickCount();
             }
-        }
 
-        if (g_hPressed) {
-            newX -= g_mouseSpeed / 10;  // 分成10份移动，实现平滑效果
-            moved = true;
-        }
-        if (g_jPressed) {
-            newY += g_mouseSpeed / 10;
-            moved = true;
-        }
-        if (g_kPressed) {
-            newY -= g_mouseSpeed / 10;
-            moved = true;
-        }
-        if (g_lPressed) {
-            newX += g_mouseSpeed / 10;
-            moved = true;
-        }
-        // 添加对角方向移动
-        if (g_uPressed) {
-            newX -= g_mouseSpeed / 7;  // 左
-            newY -= g_mouseSpeed / 7;  // 上
-
-            moved = true;
-        }
-        if (g_oPressed) {
-            newX += g_mouseSpeed / 7;  // 右
-            newY -= g_mouseSpeed / 7;  // 上
-            moved = true;
-        }
-        if (g_nPressed) {
-            newX -= g_mouseSpeed / 7;  // 左
-            newY += g_mouseSpeed / 7;  // 下
-            moved = true;
-        }
-        if (g_dotPressed) {  // 修改：使用g_dotPressed表示句号键
-            newX += g_mouseSpeed / 7;  // 右
-            newY += g_mouseSpeed / 7;  // 下
-            moved = true;
+            if (g_hPressed) { newX -= g_mouseSpeed / 10; moved = true; }
+            if (g_jPressed) { newY += g_mouseSpeed / 10; moved = true; }
+            if (g_kPressed) { newY -= g_mouseSpeed / 10; moved = true; }
+            if (g_lPressed) { newX += g_mouseSpeed / 10; moved = true; }
+            if (g_uPressed) { newX -= g_mouseSpeed / 7; newY -= g_mouseSpeed / 7; moved = true; }
+            if (g_oPressed) { newX += g_mouseSpeed / 7; newY -= g_mouseSpeed / 7; moved = true; }
+            if (g_nPressed) { newX -= g_mouseSpeed / 7; newY += g_mouseSpeed / 7; moved = true; }
+            if (g_dotPressed) { newX += g_mouseSpeed / 7; newY += g_mouseSpeed / 7; moved = true; }
         }
 
         if (moved) {
@@ -487,6 +574,7 @@ void SmoothMoveThread() {
 void StartSmoothMove() {
     if (!g_shouldMove) {
         g_shouldMove = true;
+        SetMovingCursor();
         g_moveThread = new std::thread(SmoothMoveThread);
     }
 }
@@ -503,6 +591,7 @@ void StopSmoothMove() {
         // 如果正在加速，恢复到上次设置的速度
         g_mouseSpeed = g_lastSetSpeed;
         g_isAccelerating = false;
+        if (g_isActive) SetVimouseCursor(); // 恢复待机光标
         UpdateIndicatorPosition();
     }
 }
@@ -1529,6 +1618,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_ctrlPressed = isKeyDown;
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
         }
+        // 更新Shift键状态
+        if (vkCode == VK_SHIFT || vkCode == VK_LSHIFT || vkCode == VK_RSHIFT) {
+            g_shiftPressed = isKeyDown;
+            return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+        }
         if(vkCode == VK_UP || vkCode == VK_DOWN || vkCode == VK_LEFT || vkCode == VK_RIGHT)
         {
             return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
@@ -1580,7 +1674,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         if (isKeyDown && ((vkCode == 'J' && g_ctrlPressed) || (vkCode == 'K' && g_ctrlPressed && g_altPressed))) {
             g_isActive = !g_isActive;
             if (g_isActive) {
-
+                SetVimouseCursor();
                 ShowTagWindowsNonInteractive();
                 g_currentScreenIndex = GetCurrentScreenIndex();
                 if (vkCode == 'K')
@@ -1610,6 +1704,8 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 // 重新枚举显示器
                 g_screenRects.clear();
                 EnumDisplayMonitors(NULL, NULL, EnumDisplayMonitorsProc, 0);
+            } else {
+                RestoreSystemCursor();
             }
             g_dotSize = 5;
             // 更新指示器位置
@@ -1619,9 +1715,10 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
         GetCursorPos(&g_lastMousePos);  // 记录当前位置
 
-        // 检查 Eenter 关闭激活状态,并且在当前区域点击一下鼠标
+        // 检查 Enter 关闭激活状态,并且在当前区域点击一下鼠标
         if (isKeyDown && vkCode == VK_RETURN && g_isActive) {
             g_isActive = false;
+            RestoreSystemCursor();
             ExitHintMode(false);  // 退出hint模式
             ExitWheelMode();  // 退出滚轮模式
             ExitGridMode();   // 退出grid模式
@@ -1662,6 +1759,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             }
 
             g_isActive = false;
+            RestoreSystemCursor();
             ExitWheelMode();  // 退出滚轮模式
             ExitGridMode();   // 退出grid模式
             ExitTagMode();
@@ -1986,48 +2084,56 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 }
 
                 switch (vkCode) {
-                case 'H':  // 左移
+                case 'H':  // 左移（Shift+H = 水平左滚）
                     if (g_ctrlPressed) {
-                        // Ctrl+H传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    if (g_shiftPressed) {
+                        mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -g_wheelSpeed, 0);
+                        return 1;
                     }
                     g_hPressed = true;
-                    g_lastActionWasC = false;  // 重置C键状态
+                    g_lastActionWasC = false;
                     StartSmoothMove();
-                    // 更新指示器位置
                     UpdateIndicatorPosition();
                     break;
-                case 'J':  // 下移
+                case 'J':  // 下移（Shift+J = 向下滚动）
                     if (g_ctrlPressed) {
-                        // Ctrl+J传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    if (g_shiftPressed) {
+                        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -g_wheelSpeed, 0);
+                        return 1;
                     }
                     g_jPressed = true;
-                    g_lastActionWasC = false;  // 重置C键状态
+                    g_lastActionWasC = false;
                     StartSmoothMove();
-                    // 更新指示器位置
                     UpdateIndicatorPosition();
                     break;
-                case 'K':  // 上移
+                case 'K':  // 上移（Shift+K = 向上滚动）
                     if (g_ctrlPressed) {
-                        // Ctrl+K传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                    }
+                    if (g_shiftPressed) {
+                        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, g_wheelSpeed, 0);
+                        return 1;
                     }
                     g_kPressed = true;
-                    g_lastActionWasC = false;  // 重置C键状态
+                    g_lastActionWasC = false;
                     StartSmoothMove();
-                    // 更新指示器位置
                     UpdateIndicatorPosition();
                     break;
-                case 'L':  // 右移
+                case 'L':  // 右移（Shift+L = 水平右滚）
                     if (g_ctrlPressed) {
-                        // Ctrl+L传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
+                    if (g_shiftPressed) {
+                        mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, g_wheelSpeed, 0);
+                        return 1;
+                    }
                     g_lPressed = true;
-                    g_lastActionWasC = false;  // 重置C键状态
+                    g_lastActionWasC = false;
                     StartSmoothMove();
-                    // 更新指示器位置
                     UpdateIndicatorPosition();
                     break;
 
@@ -2137,28 +2243,35 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     return 1;
 
                     // 鼠标点击
-                case 'F':  // 左键点击
+                case 'F':  // 左键点击（支持 Shift+F = Shift+Click, 保留 Ctrl+Click 传递）
                     if (!g_leftButtonDown) {
-                        g_leftButtonDown = true;  // 设置左键按下状态
-                        // 更新指示器位置（会触发重绘）
+                        // 按住 Shift 时模拟 Shift+Click
+                        if (g_shiftPressed) keybd_event(VK_SHIFT, 0, 0, 0);
+                        g_leftButtonDown = true;
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                         UpdateIndicatorPosition();
                         AddMousePositionToStack();
-                        g_lastActionWasC = false;  // 重置C键状态
+                        if (g_shiftPressed) keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+                        g_lastActionWasC = false;
                     }
                     return 1;
                     break;
                 case 'G':  // 右键点击
-                    g_rightButtonDown = true;  // 设置右键按下状态
-                    // 更新指示器位置（会触发重绘）
+                    g_rightButtonDown = true;
                     UpdateIndicatorPosition();
                     mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                    g_rightButtonDown = false;  // 设置右键抬起状态
-                    // 更新指示器位置（会触发重绘）
+                    g_rightButtonDown = false;
                     UpdateIndicatorPosition();
-                    g_lastActionWasC = false;  // 重置C键状态
+                    g_lastActionWasC = false;
+                    break;
+                case 'B':  // 中键点击
+                    mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                    mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+                    g_lastActionWasC = false;
+                    UpdateIndicatorPosition();
                     break;
 
                     // 拖动控制
@@ -2411,6 +2524,90 @@ bool RemoveTagBySameLetter(char letter) {
 }
 
 // 创建一个显示在任务栏的窗口来接收消息循环
+// 托盘图标数据
+static NOTIFYICONDATA g_nid = {};
+
+static void AddTrayIcon(HWND hwnd, HINSTANCE hInstance) {
+    g_nid.cbSize = sizeof(NOTIFYICONDATA);
+    g_nid.hWnd = hwnd;
+    g_nid.uID = 1;
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    g_nid.uCallbackMessage = WM_TRAYICON;
+    g_nid.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MOUSECONTROLLER));
+    wcscpy_s(g_nid.szTip, L"Vimouse");
+    Shell_NotifyIcon(NIM_ADD, &g_nid);
+}
+
+static void RemoveTrayIcon() {
+    Shell_NotifyIcon(NIM_DELETE, &g_nid);
+}
+
+static bool IsSystemChinese() {
+    LANGID lang = GetUserDefaultUILanguage();
+    return PRIMARYLANGID(lang) == LANG_CHINESE;
+}
+
+static void ShowHelpDialog(HWND hwnd) {
+    if (IsSystemChinese()) {
+        const wchar_t* helpText =
+            L"Vimouse \u64CD\u4F5C\u6307\u5357\n"
+            L"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n"
+            L"\u3010\u6FC0\u6D3B/\u9000\u51FA\u3011Ctrl+J \u5207\u6362\u952E\u76D8\u9F20\u6807\u6A21\u5F0F\n\n"
+            L"\u3010\u79FB\u52A8\u3011h/j/k/l = \u5DE6/\u4E0B/\u4E0A/\u53F3\n"
+            L"\u3000\u3000\u3000  u/o/n/. = \u5DE6\u4E0A/\u53F3\u4E0A/\u5DE6\u4E0B/\u53F3\u4E0B\n"
+            L"\u3000\u3000\u3000  \u957F\u6309\u81EA\u52A8\u52A0\u901F\n\n"
+            L"\u3010\u70B9\u51FB\u3011c = \u5DE6\u952E  x = \u53F3\u952E  v = \u53CC\u51FB\n"
+            L"\u3010\u62D6\u62FD\u3011d = \u5F00\u59CB/\u7ED3\u675F\u62D6\u62FD\n"
+            L"\u3010\u6EDA\u8F6E\u3011w \u8FDB\u5165\u6EDA\u8F6E\u6A21\u5F0F (j/k \u4E0A\u4E0B\u6EDA)\n\n"
+            L"\u3010\u6807\u7B7E\u3011p = \u5728\u5F53\u524D\u4F4D\u7F6E\u653E\u6807\u7B7E\n"
+            L"\u3000\u3000\u3000  t = \u8FDB\u5165\u6807\u7B7E\u8DF3\u8F6C\u6A21\u5F0F\n\n"
+            L"\u3010Hint\u3011f = \u5C4F\u5E55\u5750\u6807\u5FEB\u901F\u8DF3\u8F6C\n"
+            L"\u3010Grid\u3011g = \u7F51\u683C\u4E8C\u5206\u5B9A\u4F4D\n\n"
+            L"\u3010\u7BA1\u9053 IPC\u3011\\\\.\\pipe\\vimouse\n"
+            L"  \u547D\u4EE4: move click rclick dclick drag\n"
+            L"        scroll pos keypress type\n"
+            L"        tags tag sleep help";
+        MessageBox(hwnd, helpText, L"Vimouse \u5E2E\u52A9", MB_OK | MB_ICONINFORMATION);
+    } else {
+        const wchar_t* helpText =
+            L"Vimouse Quick Guide\n"
+            L"=======================\n\n"
+            L"[Toggle] Ctrl+J to switch keyboard-mouse mode\n\n"
+            L"[Move] h/j/k/l = Left/Down/Up/Right\n"
+            L"       u/o/n/. = Diagonals\n"
+            L"       Hold to accelerate\n\n"
+            L"[Click] c = Left  x = Right  v = Double\n"
+            L"[Drag]  d = Start/End drag\n"
+            L"[Scroll] w = Scroll mode (j/k to scroll)\n\n"
+            L"[Tags] p = Place tag at cursor\n"
+            L"       t = Enter tag-jump mode\n\n"
+            L"[Hint] f = Screen coordinate quick jump\n"
+            L"[Grid] g = Grid bisect positioning\n\n"
+            L"[Pipe IPC] \\\\.\\pipe\\vimouse\n"
+            L"  Commands: move click rclick dclick drag\n"
+            L"            scroll pos keypress type\n"
+            L"            tags tag sleep help";
+        MessageBox(hwnd, helpText, L"Vimouse Help", MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+static void ShowTrayMenu(HWND hwnd) {
+    bool zh = IsSystemChinese();
+    POINT pt;
+    GetCursorPos(&pt);
+    HMENU hMenu = CreatePopupMenu();
+    AppendMenu(hMenu, g_isActive ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_TOGGLE,
+        zh ? L"\u542F\u7528\u952E\u76D8\u63A7\u5236" : L"Enable Keyboard Control");
+    AppendMenu(hMenu, MF_STRING, IDM_TRAY_HELP,
+        zh ? L"\u64CD\u4F5C\u6307\u5357" : L"Quick Guide");
+    AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenu(hMenu, MF_STRING, IDM_TRAY_EXIT,
+        zh ? L"\u9000\u51FA" : L"Exit");
+    SetForegroundWindow(hwnd);
+    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL);
+    DestroyMenu(hMenu);
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
@@ -2430,14 +2627,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 加载标签配置
         LoadTagsFromConfig();
 
-        // 初始化 UI Automation
-        InitUIAutomation();
-
         // 启动 Named Pipe 服务端
         StartPipeServer();
 
-        // 启动 HTTP 截图服务器
-        StartHttpServer(59123);
+        // 添加系统托盘图标
+        AddTrayIcon(hwnd, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE));
 
         // 设置键盘钩子
         g_keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc,
@@ -2448,13 +2642,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         break;
 
+    case WM_TRAYICON:
+        if (lParam == WM_RBUTTONUP) {
+            ShowTrayMenu(hwnd);
+        } else if (lParam == WM_LBUTTONDBLCLK) {
+            // 双击托盘图标切换启用状态
+            g_isActive = !g_isActive;
+            UpdateIndicatorPosition();
+        }
+        break;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDM_TRAY_TOGGLE:
+            g_isActive = !g_isActive;
+            UpdateIndicatorPosition();
+            break;
+        case IDM_TRAY_HELP:
+            ShowHelpDialog(hwnd);
+            break;
+        case IDM_TRAY_EXIT:
+            DestroyWindow(hwnd);
+            break;
+        }
+        break;
+
     case WM_DESTROY:
-        // 停止 HTTP 服务器
-        StopHttpServer();
+        // 移除托盘图标
+        RemoveTrayIcon();
         // 停止 Pipe 服务端
         StopPipeServer();
-        // 清理 UI Automation
-        CleanupUIAutomation();
         // 停止平滑移动
         StopSmoothMove();
 
@@ -2524,7 +2741,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // 检查是否已经有一个实例在运行
     HANDLE hMutex = CreateMutex(NULL, TRUE, L"MouseControllerMutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        MessageBox(NULL, L"程序已经在运行中！", L"提示", MB_OK | MB_ICONINFORMATION);
+        MessageBox(NULL,
+            IsSystemChinese() ? L"\u7A0B\u5E8F\u5DF2\u7ECF\u5728\u8FD0\u884C\u4E2D\uFF01" : L"Vimouse is already running!",
+            L"Vimouse", MB_OK | MB_ICONINFORMATION);
         CloseHandle(hMutex);
         return 1;
     }
@@ -2544,14 +2763,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // 创建一个可见窗口（显示在任务栏）
+    // 创建隐藏的消息窗口（托盘模式，不在任务栏显示）
     g_hwnd = CreateWindowEx(
         0,
         L"MouseControllerClass",
         L"Vimouse",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        300, 200,
+        0, 0, 0, 0,
         NULL, NULL, hInstance, NULL
     );
 
@@ -2561,9 +2779,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // 显示窗口（但保持最小化或隐藏在任务栏）
-    ShowWindow(g_hwnd, SW_MINIMIZE);
-    UpdateWindow(g_hwnd);
+    // 不显示窗口，仅通过系统托盘交互
 
     // 消息循环
     MSG msg;

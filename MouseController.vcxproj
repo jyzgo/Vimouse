@@ -125,12 +125,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Common.h" />
-    <ClInclude Include="ScreenOCR.h" />
-    <ClInclude Include="HttpServer.h" />
     <ClInclude Include="PipeServer.h" />
     <ClInclude Include="CommandHandler.h" />
-    <ClInclude Include="WindowQuery.h" />
-    <ClInclude Include="UIAutomation.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="MouseController.h" />
     <ClInclude Include="Resource.h" />
@@ -140,10 +136,6 @@
     <ClCompile Include="Vimouse.cpp" />
     <ClCompile Include="PipeServer.cpp" />
     <ClCompile Include="CommandHandler.cpp" />
-    <ClCompile Include="WindowQuery.cpp" />
-    <ClCompile Include="UIAutomation.cpp" />
-    <ClCompile Include="ScreenOCR.cpp" />
-    <ClCompile Include="HttpServer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MouseController.rc" />
