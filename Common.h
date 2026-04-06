@@ -51,6 +51,7 @@ extern bool g_iskeyDown;
 extern bool g_ctrlPressed;
 extern bool g_altPressed;
 extern bool g_winPressed;
+extern bool g_shiftPressed;
 
 extern bool g_hPressed;
 extern bool g_jPressed;
