@@ -81,6 +81,17 @@ extern int g_tagTabIndex;
 
 extern POINT g_lastMousePoint;
 
+// 远程模式
+extern bool g_remoteMode;
+extern std::string g_remoteHost;
+void SendRemoteCmd(const std::string& cmd);
+bool StartRemoteMode(const std::string& host, const std::string& remotePath);
+void StopRemoteMode();
+
+// 设置
+void ShowSettingsDialog(HWND parent);
+std::string GetVimouseConfigDir();
+
 // 自定义消息 - 用于 Pipe Server 向主线程发送命令
 #define WM_PIPE_COMMAND (WM_USER + 100)
 

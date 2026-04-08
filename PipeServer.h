@@ -13,3 +13,6 @@ int RunCLIClient(const std::string& command);
 
 // CLI 客户端：执行脚本文件
 int RunCLIScript(const std::string& filePath);
+
+// stdin→pipe 桥接模式（用于远程控制）
+int RunPipeStdinBridge();
