@@ -131,6 +131,53 @@ int RunCLIClient(const std::string& command) {
     return 1;
 }
 
+// stdin→pipe 桥接模式：从 stdin 读命令，转发到命名管道，结果写 stdout
+// 用于远程控制：ssh host "Vimouse.exe --pipe-stdin"
+int RunPipeStdinBridge() {
+    char line[4096];
+    while (fgets(line, sizeof(line), stdin)) {
+        // 去掉尾部换行
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        if (len == 0) continue;
+
+        // 连接管道
+        HANDLE hPipe = CreateFileW(
+            VIMOUSE_PIPE_NAME,
+            GENERIC_READ | GENERIC_WRITE,
+            0, NULL, OPEN_EXISTING, 0, NULL
+        );
+        if (hPipe == INVALID_HANDLE_VALUE) {
+            fprintf(stdout, "ERR pipe connect failed\n");
+            fflush(stdout);
+            continue;
+        }
+
+        DWORD mode = PIPE_READMODE_MESSAGE;
+        SetNamedPipeHandleState(hPipe, &mode, NULL, NULL);
+
+        // 发送命令
+        std::string cmd(line);
+        cmd += "\n";
+        DWORD written;
+        WriteFile(hPipe, cmd.c_str(), (DWORD)cmd.size(), &written, NULL);
+
+        // 读取结果
+        char buf[4096] = {};
+        DWORD bytesRead;
+        ReadFile(hPipe, buf, sizeof(buf) - 1, &bytesRead, NULL);
+        CloseHandle(hPipe);
+
+        if (bytesRead > 0) {
+            buf[bytesRead] = '\0';
+            fprintf(stdout, "%s", buf);
+            fflush(stdout);
+        }
+    }
+    return 0;
+}
+
 // CLI 脚本模式
 int RunCLIScript(const std::string& filePath) {
     std::ifstream file(filePath);

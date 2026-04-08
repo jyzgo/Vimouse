@@ -122,6 +122,38 @@ std::string HandleCommand(const std::string& command) {
 
     const std::string& cmd = parts[0];
 
+    // rmove dx dy - relative mouse move
+    if (cmd == "rmove") {
+        if (parts.size() < 3) return "ERR rmove requires dx dy";
+        int dx, dy;
+        if (!ParseInt(parts[1], dx) || !ParseInt(parts[2], dy))
+            return "ERR invalid delta";
+        POINT p;
+        GetCursorPos(&p);
+        SetCursorPos(p.x + dx, p.y + dy);
+        return "OK";
+    }
+
+    // mousedown [left|right|middle]
+    if (cmd == "mousedown") {
+        std::string btn = parts.size() >= 2 ? parts[1] : "left";
+        if (btn == "left") mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        else if (btn == "right") mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+        else if (btn == "middle") mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
+        else return "ERR unknown button: " + btn;
+        return "OK";
+    }
+
+    // mouseup [left|right|middle]
+    if (cmd == "mouseup") {
+        std::string btn = parts.size() >= 2 ? parts[1] : "left";
+        if (btn == "left") mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        else if (btn == "right") mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+        else if (btn == "middle") mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+        else return "ERR unknown button: " + btn;
+        return "OK";
+    }
+
     // move x y
     if (cmd == "move") {
         if (parts.size() < 3) return "ERR move requires x y";
@@ -364,7 +396,7 @@ std::string HandleCommand(const std::string& command) {
 
     // help - 列出所有可用命令
     if (cmd == "help") {
-        return "OK commands: move click rclick dclick mclick drag scroll pos keypress type tags tag sleep status activate deactivate screen help";
+        return "OK commands: rmove move click rclick dclick mclick mousedown mouseup drag scroll pos keypress type tags tag sleep status activate deactivate screen help";
     }
 
     return "ERR unknown command: " + cmd;

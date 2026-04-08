@@ -82,6 +82,145 @@ bool g_tagMode = false;  // 是否处于tag模式
 bool g_editTagMode = false;
 int g_tagTabIndex = 1;
 
+// 远程模式
+bool g_remoteMode = false;
+std::string g_remoteHost = "";
+static char g_remoteLastKey[8] = "";
+static HANDLE g_remoteProcess = NULL;
+static HANDLE g_remoteStdinWrite = NULL;
+static HANDLE g_remoteStdoutRead = NULL;
+
+// 远程主机配置 (host|remote_exe_path)
+struct RemoteHostInfo {
+    std::string host;
+    std::string exePath;
+};
+static std::vector<RemoteHostInfo> g_remoteHosts;
+
+std::string GetVimouseConfigDir() {
+    char home[MAX_PATH];
+    if (SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, home) != S_OK) return "";
+    std::string dir = std::string(home) + "\\.vimouse";
+    CreateDirectoryA(dir.c_str(), NULL);
+    return dir;
+}
+
+static void LoadRemoteHosts() {
+    g_remoteHosts.clear();
+    std::string path = GetVimouseConfigDir() + "\\.remote_hosts";
+    std::ifstream f(path);
+    if (!f.is_open()) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        size_t sep = line.find('|');
+        RemoteHostInfo info;
+        if (sep != std::string::npos) {
+            info.host = line.substr(0, sep);
+            info.exePath = line.substr(sep + 1);
+        } else {
+            info.host = line;
+            info.exePath = "Vimouse.exe";
+        }
+        g_remoteHosts.push_back(info);
+    }
+}
+
+static void SaveRemoteHosts() {
+    std::string path = GetVimouseConfigDir() + "\\.remote_hosts";
+    std::ofstream f(path);
+    for (const auto& h : g_remoteHosts) {
+        f << h.host << "|" << h.exePath << "\n";
+    }
+}
+
+void SendRemoteCmd(const std::string& cmd) {
+    if (!g_remoteMode || !g_remoteStdinWrite) return;
+    std::string line = cmd + "\n";
+    DWORD written;
+    WriteFile(g_remoteStdinWrite, line.c_str(), (DWORD)line.size(), &written, NULL);
+}
+
+bool StartRemoteMode(const std::string& host, const std::string& remotePath) {
+    if (g_remoteMode) StopRemoteMode();
+
+    // 创建管道用于 stdin/stdout 重定向
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE stdinRead, stdinWrite, stdoutRead, stdoutWrite;
+    CreatePipe(&stdinRead, &stdinWrite, &sa, 0);
+    CreatePipe(&stdoutRead, &stdoutWrite, &sa, 0);
+    SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si = { sizeof(si) };
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = stdinRead;
+    si.hStdOutput = stdoutWrite;
+    si.hStdError = stdoutWrite;
+
+    PROCESS_INFORMATION pi = {};
+
+    // 构建 SSH 命令
+    std::string cmdLine = "ssh " + host + " \"" + remotePath + " --pipe-stdin\"";
+
+    if (!CreateProcessA(NULL, (LPSTR)cmdLine.c_str(), NULL, NULL, TRUE,
+        CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CloseHandle(stdinRead); CloseHandle(stdinWrite);
+        CloseHandle(stdoutRead); CloseHandle(stdoutWrite);
+        return false;
+    }
+
+    CloseHandle(stdinRead);
+    CloseHandle(stdoutWrite);
+
+    g_remoteProcess = pi.hProcess;
+    CloseHandle(pi.hThread);
+    g_remoteStdinWrite = stdinWrite;
+    g_remoteStdoutRead = stdoutRead;
+    g_remoteMode = true;
+    g_remoteHost = host;
+
+    // 激活远程 Vimouse
+    SendRemoteCmd("activate");
+    return true;
+}
+
+void StopRemoteMode() {
+    if (!g_remoteMode) return;
+    SendRemoteCmd("deactivate");
+    if (g_remoteStdinWrite) { CloseHandle(g_remoteStdinWrite); g_remoteStdinWrite = NULL; }
+    if (g_remoteStdoutRead) { CloseHandle(g_remoteStdoutRead); g_remoteStdoutRead = NULL; }
+    if (g_remoteProcess) { TerminateProcess(g_remoteProcess, 0); CloseHandle(g_remoteProcess); g_remoteProcess = NULL; }
+    g_remoteMode = false;
+    g_remoteHost = "";
+}
+
+// 开机启动
+static bool IsAutoStartEnabled() {
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return false;
+    char buf[MAX_PATH];
+    DWORD size = sizeof(buf);
+    bool exists = RegQueryValueExA(hKey, "Vimouse", NULL, NULL, (LPBYTE)buf, &size) == ERROR_SUCCESS;
+    RegCloseKey(hKey);
+    return exists;
+}
+
+static void SetAutoStart(bool enable) {
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) != ERROR_SUCCESS)
+        return;
+    if (enable) {
+        char path[MAX_PATH];
+        GetModuleFileNameA(NULL, path, MAX_PATH);
+        RegSetValueExA(hKey, "Vimouse", 0, REG_SZ, (LPBYTE)path, (DWORD)strlen(path) + 1);
+    } else {
+        RegDeleteValueA(hKey, "Vimouse");
+    }
+    RegCloseKey(hKey);
+}
+
 // 自定义光标
 static HCURSOR g_cursorIdle = NULL;     // Vimouse 待机光标（绿色十字准星）
 static HCURSOR g_cursorMoving = NULL;   // 按下移动键时的光标（橙色实心圆点）
@@ -766,14 +905,22 @@ void SmoothMoveThread() {
         }
 
         if (moved) {
-            SetCursorPos(newX, newY);
+            if (g_remoteMode) {
+                int dx = newX - currentPos.x;
+                int dy = newY - currentPos.y;
+                if (dx != 0 || dy != 0) {
+                    SendRemoteCmd("rmove " + std::to_string(dx) + " " + std::to_string(dy));
+                }
+            } else {
+                SetCursorPos(newX, newY);
 
-            // 移动线程不操作任何窗口（避免跨线程 UI 导致卡死）
-            // 坐标标签在 StopSmoothMove → UpdateIndicatorPosition 时更新
+                // 移动线程不操作任何窗口（避免跨线程 UI 导致卡死）
+                // 坐标标签在 StopSmoothMove → UpdateIndicatorPosition 时更新
 
-            // 如果正在拖动，继续发送拖动事件
-            if (g_isDragging) {
-                mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                // 如果正在拖动，继续发送拖动事件
+                if (g_isDragging) {
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                }
             }
         }
 
@@ -1261,34 +1408,48 @@ LRESULT CALLBACK IndicatorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
 
         FillRect(hdc, &rect, g_coordBgBrush);
-
-        POINT mousePos;
-        GetCursorPos(&mousePos);
-        char coord[3];
-        GetHintCoord(mousePos, coord);
-
         SetBkMode(hdc, TRANSPARENT);
-        HGDIOBJ oldFont = SelectObject(hdc, g_clickFlash ? g_coordFontBig : g_coordFont);
 
-        // 分别绘制两个字母，不同颜色
-        char c1[2] = { coord[0], '\0' };
-        char c2[2] = { coord[1], '\0' };
-
-        if (g_clickFlash) {
-            // 点击闪烁：两个字母都变黄
-            SetTextColor(hdc, RGB(255, 230, 50));
-            DrawTextA(hdc, coord, 2, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (g_remoteMode) {
+            // 远程模式：显示 REMOTE + 当前按键
+            HGDIOBJ oldFont = SelectObject(hdc, g_coordFont);
+            RECT rLabel = rect;
+            rLabel.right = rect.right - 18;
+            SetTextColor(hdc, RGB(100, 200, 255));  // 浅蓝
+            DrawTextA(hdc, "RMT", 3, &rLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if (g_remoteLastKey[0]) {
+                RECT rKey = rect;
+                rKey.left = rect.right - 18;
+                SetTextColor(hdc, RGB(255, 230, 50));  // 黄色
+                DrawTextA(hdc, g_remoteLastKey, -1, &rKey, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
+            SelectObject(hdc, oldFont);
         } else {
-            // 正常：左半绿，右半青
-            RECT r1 = rect;
-            r1.right = (rect.right - rect.left) / 2;
-            RECT r2 = rect;
-            r2.left = r1.right;
+            POINT mousePos;
+            GetCursorPos(&mousePos);
+            char coord[3];
+            GetHintCoord(mousePos, coord);
 
-            SetTextColor(hdc, RGB(50, 255, 120));   // 亮绿（列）
-            DrawTextA(hdc, c1, 1, &r1, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            SetTextColor(hdc, RGB(255, 160, 40));   // 亮橙（行）
-            DrawTextA(hdc, c2, 1, &r2, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            HGDIOBJ oldFont = SelectObject(hdc, g_clickFlash ? g_coordFontBig : g_coordFont);
+
+            char c1[2] = { coord[0], '\0' };
+            char c2[2] = { coord[1], '\0' };
+
+            if (g_clickFlash) {
+                SetTextColor(hdc, RGB(255, 230, 50));
+                DrawTextA(hdc, coord, 2, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            } else {
+                RECT r1 = rect;
+                r1.right = (rect.right - rect.left) / 2;
+                RECT r2 = rect;
+                r2.left = r1.right;
+
+                SetTextColor(hdc, RGB(50, 255, 120));
+                DrawTextA(hdc, c1, 1, &r1, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                SetTextColor(hdc, RGB(255, 160, 40));
+                DrawTextA(hdc, c2, 1, &r2, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
+            SelectObject(hdc, oldFont);
         }
 
         SelectObject(hdc, oldFont);
@@ -1354,9 +1515,9 @@ void UpdateIndicatorPosition() {
         if (g_clickFlash) {
             InvalidateRect(g_indicatorWindow, NULL, TRUE);
         } else {
-            // SetWindowPos 同时更新位置和 Z-order，确保在任务栏之上
+            int w = g_remoteMode ? 50 : 22;
             SetWindowPos(g_indicatorWindow, HWND_TOPMOST,
-                mousePos.x + 12, mousePos.y + 12, 22, 16,
+                mousePos.x + 12, mousePos.y + 12, w, 16,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
             InvalidateRect(g_indicatorWindow, NULL, TRUE);
         }
@@ -2018,7 +2179,25 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         //    (vkCode == 'K'),
         //    (isKeyDown && (vkCode == 'J' || vkCode == 'K') && g_altPressed)
         //);
-        // 检查 Ctrl+\ 切换激活状态
+        // Ctrl+Alt+J: 切换远程模式
+        if (isKeyDown && vkCode == 'J' && g_ctrlPressed && g_altPressed) {
+            if (g_remoteMode) {
+                StopRemoteMode();
+                UpdateIndicatorPosition();
+            } else {
+                // 连接第一个配置的远程主机
+                LoadRemoteHosts();
+                if (!g_remoteHosts.empty()) {
+                    StartRemoteMode(g_remoteHosts[0].host, g_remoteHosts[0].exePath);
+                    g_isActive = true;
+                    SetVimouseCursor();
+                    UpdateIndicatorPosition();
+                }
+            }
+            return 1;
+        }
+
+        // Ctrl+J / Ctrl+Alt+K: 切换本地激活状态
         if (isKeyDown && ((vkCode == 'J' && g_ctrlPressed) || (vkCode == 'K' && g_ctrlPressed && g_altPressed))) {
             g_isActive = !g_isActive;
             if (g_isActive) {
@@ -2345,20 +2524,22 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
                 // 滚轮模式处理：如果在滚轮模式下，HJKL用于滚轮滚动
                 if (g_wheelMode) {
-                    //GetCursorPos(&currentPos);
-
                     switch (vkCode) {
-                    case 'H':  // 左移 -> 水平向左滚动
-                        mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -g_wheelSpeed, 0);
+                    case 'H':
+                        if (g_remoteMode) SendRemoteCmd("scroll left");
+                        else mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, -g_wheelSpeed, 0);
                         break;
-                    case 'J':  // 下移 -> 垂直向下滚动
-                        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -g_wheelSpeed, 0);
+                    case 'J':
+                        if (g_remoteMode) SendRemoteCmd("scroll down");
+                        else mouse_event(MOUSEEVENTF_WHEEL, 0, 0, -g_wheelSpeed, 0);
                         break;
-                    case 'K':  // 上移 -> 垂直向上滚动
-                        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, g_wheelSpeed, 0);
+                    case 'K':
+                        if (g_remoteMode) SendRemoteCmd("scroll up");
+                        else mouse_event(MOUSEEVENTF_WHEEL, 0, 0, g_wheelSpeed, 0);
                         break;
-                    case 'L':  // 右移 -> 水平向右滚动
-                        mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, g_wheelSpeed, 0);
+                    case 'L':
+                        if (g_remoteMode) SendRemoteCmd("scroll right");
+                        else mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, g_wheelSpeed, 0);
                         break;
                     case 'Y':  // 再次按U键退出滚轮模式
                         ExitWheelMode();
@@ -2440,6 +2621,15 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 if (vkCode >= VK_NUMPAD0 && vkCode <= VK_NUMPAD9)
                 {
 					return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
+                }
+
+                // 远程模式：更新按键显示
+                if (g_remoteMode) {
+                    char keyName = (vkCode >= 'A' && vkCode <= 'Z') ? (char)vkCode : '?';
+                    if (vkCode == VK_OEM_PERIOD) keyName = '.';
+                    g_remoteLastKey[0] = keyName;
+                    g_remoteLastKey[1] = '\0';
+                    InvalidateRect(g_indicatorWindow, NULL, TRUE);
                 }
 
                 switch (vkCode) {
@@ -2609,30 +2799,42 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 鼠标点击
                 case 'F':  // 左键点击（支持 Shift+F = Shift+Click, 保留 Ctrl+Click 传递）
                     if (!g_leftButtonDown) {
-                        if (g_shiftPressed) keybd_event(VK_SHIFT, 0, 0, 0);
                         g_leftButtonDown = true;
-                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                        if (g_remoteMode) {
+                            SendRemoteCmd("mousedown left");
+                        } else {
+                            if (g_shiftPressed) keybd_event(VK_SHIFT, 0, 0, 0);
+                            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                            if (g_shiftPressed) keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+                        }
                         TriggerClickFlash();
                         AddMousePositionToStack();
-                        if (g_shiftPressed) keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
                         g_lastActionWasC = false;
                     }
                     return 1;
                     break;
                 case 'G':  // 右键点击
-                    g_rightButtonDown = true;
-                    mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                    g_rightButtonDown = false;
+                    if (g_remoteMode) {
+                        SendRemoteCmd("rclick");
+                    } else {
+                        g_rightButtonDown = true;
+                        mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                        g_rightButtonDown = false;
+                    }
                     TriggerClickFlash();
                     SetTimer(g_indicatorWindow, TIMER_CLICK_FLASH, 300, NULL);
                     g_lastActionWasC = false;
                     break;
                 case 'B':  // 中键点击
-                    mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(30));
-                    mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+                    if (g_remoteMode) {
+                        SendRemoteCmd("mclick");
+                    } else {
+                        mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                        mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0);
+                    }
                     TriggerClickFlash();
                     SetTimer(g_indicatorWindow, TIMER_CLICK_FLASH, 300, NULL);
                     g_lastActionWasC = false;
@@ -2641,18 +2843,17 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     // 拖动控制
                 case 'V':
                     if (g_ctrlPressed) {
-                        // 如果V键是和Ctrl一起按下的，不执行V键功能，直接传递给其他程序
                         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
                     }
                     if (!g_isDragging) {
-                        // 开始拖动
                         GetCursorPos(&g_lastMousePos);
-                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                        if (g_remoteMode) SendRemoteCmd("mousedown left");
+                        else mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                         g_isDragging = true;
                     }
                     else {
-                        // 结束拖动
-                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                        if (g_remoteMode) SendRemoteCmd("mouseup left");
+                        else mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                         g_isDragging = false;
                     }
                     g_lastActionWasC = false;  // 重置C键状态
@@ -2801,13 +3002,19 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     if (g_leftButtonDown)
                     {
                         g_leftButtonDown = false;
-                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                        if (g_remoteMode) SendRemoteCmd("mouseup left");
+                        else mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
                         EndClickFlash();
                     }
                     break;
                 default:
                     return 0;
 
+                }
+                // 远程模式：键释放时清除按键显示
+                if (g_remoteMode) {
+                    g_remoteLastKey[0] = '\0';
+                    InvalidateRect(g_indicatorWindow, NULL, TRUE);
                 }
             }
         }
@@ -2959,15 +3166,39 @@ static void ShowTrayMenu(HWND hwnd) {
     POINT pt;
     GetCursorPos(&pt);
     HMENU hMenu = CreatePopupMenu();
+
     AppendMenu(hMenu, g_isActive ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_TOGGLE,
-        zh ? L"\u542F\u7528\u952E\u76D8\u63A7\u5236" : L"Enable Keyboard Control");
+        zh ? L"\u542F\u7528\u952E\u76D8\u63A7\u5236 (Ctrl+J)" : L"Enable Keyboard Control (Ctrl+J)");
+
+    // 远程连接子菜单
+    LoadRemoteHosts();
+    if (!g_remoteHosts.empty() || g_remoteMode) {
+        HMENU hRemote = CreatePopupMenu();
+        if (g_remoteMode) {
+            std::wstring disconnLabel = zh ? L"\u65AD\u5F00: " : L"Disconnect: ";
+            disconnLabel += std::wstring(g_remoteHost.begin(), g_remoteHost.end());
+            AppendMenuW(hRemote, MF_STRING, IDM_TRAY_REMOTE_BASE, disconnLabel.c_str());
+        } else {
+            for (int i = 0; i < (int)g_remoteHosts.size(); i++) {
+                std::wstring label(g_remoteHosts[i].host.begin(), g_remoteHosts[i].host.end());
+                AppendMenuW(hRemote, MF_STRING, IDM_TRAY_REMOTE_BASE + 1 + i, label.c_str());
+            }
+        }
+        AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hRemote,
+            zh ? L"\u8FDC\u7A0B\u8FDE\u63A5 (Ctrl+Alt+J)" : L"Remote Connect (Ctrl+Alt+J)");
+    }
+
+    AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_TRAY_HELP,
         zh ? L"\u64CD\u4F5C\u6307\u5357" : L"Quick Guide");
     AppendMenu(hMenu, g_helpVisible ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_HELPWIN,
         zh ? L"\u60AC\u6D6E\u5E2E\u52A9" : L"Help Overlay");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenu(hMenu, MF_STRING, IDM_TRAY_SETTINGS,
+        zh ? L"\u8BBE\u7F6E..." : L"Settings...");
     AppendMenu(hMenu, MF_STRING, IDM_TRAY_EXIT,
         zh ? L"\u9000\u51FA" : L"Exit");
+
     SetForegroundWindow(hwnd);
     TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL);
     DestroyMenu(hMenu);
@@ -2995,6 +3226,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // 加载标签配置
         LoadTagsFromConfig();
 
+        // 加载远程主机配置
+        LoadRemoteHosts();
+
         // 启动 Named Pipe 服务端
         StartPipeServer();
 
@@ -3021,24 +3255,38 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case IDM_TRAY_TOGGLE:
+    {
+        WORD cmdId = LOWORD(wParam);
+        if (cmdId == IDM_TRAY_TOGGLE) {
             g_isActive = !g_isActive;
             UpdateIndicatorPosition();
-            break;
-        case IDM_TRAY_HELP:
+        } else if (cmdId == IDM_TRAY_HELP) {
             ShowHelpDialog(hwnd);
-            break;
-        case IDM_TRAY_HELPWIN:
+        } else if (cmdId == IDM_TRAY_HELPWIN) {
             ToggleHelpWindow();
-            break;
-        case IDM_TRAY_EXIT:
+        } else if (cmdId == IDM_TRAY_SETTINGS) {
+            ShowSettingsDialog(hwnd);
+        } else if (cmdId == IDM_TRAY_EXIT) {
             DestroyWindow(hwnd);
-            break;
+        } else if (cmdId == IDM_TRAY_REMOTE_BASE) {
+            // 断开远程
+            StopRemoteMode();
+            UpdateIndicatorPosition();
+        } else if (cmdId > IDM_TRAY_REMOTE_BASE && cmdId <= IDM_TRAY_REMOTE_BASE + 50) {
+            // 连接远程主机
+            int idx = cmdId - IDM_TRAY_REMOTE_BASE - 1;
+            if (idx >= 0 && idx < (int)g_remoteHosts.size()) {
+                StartRemoteMode(g_remoteHosts[idx].host, g_remoteHosts[idx].exePath);
+                g_isActive = true;
+                UpdateIndicatorPosition();
+            }
         }
         break;
+    }
 
     case WM_DESTROY:
+        // 断开远程
+        StopRemoteMode();
         // 移除托盘图标
         RemoveTrayIcon();
         // 停止 Pipe 服务端
@@ -3082,6 +3330,136 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
+// ====== 设置对话框 ======
+static HWND g_settingsWnd = NULL;
+static HWND g_hostListBox = NULL;
+static HWND g_hostEdit = NULL;
+static HWND g_pathEdit = NULL;
+static HWND g_autoStartCheck = NULL;
+
+static LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE:
+    {
+        bool zh = IsSystemChinese();
+        int y = 10;
+        CreateWindowA("BUTTON", zh ? "\xE5\xBC\x80\xE6\x9C\xBA\xE5\x90\xAF\xE5\x8A\xA8" : "Run at Startup",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 15, y, 200, 22, hwnd, (HMENU)1001, NULL, NULL);
+        g_autoStartCheck = GetDlgItem(hwnd, 1001);
+        if (IsAutoStartEnabled()) SendMessage(g_autoStartCheck, BM_SETCHECK, BST_CHECKED, 0);
+
+        y += 35;
+        CreateWindowA("STATIC", zh ? "SSH \xE4\xB8\xBB\xE6\x9C\xBA\xE5\x88\x97\xE8\xA1\xA8:" : "SSH Hosts:",
+            WS_CHILD | WS_VISIBLE, 15, y, 120, 20, hwnd, NULL, NULL, NULL);
+        y += 22;
+        g_hostListBox = CreateWindowA("LISTBOX", "",
+            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY,
+            15, y, 340, 100, hwnd, (HMENU)1002, NULL, NULL);
+        LoadRemoteHosts();
+        for (const auto& h : g_remoteHosts) {
+            std::string label = h.host + " | " + h.exePath;
+            SendMessageA(g_hostListBox, LB_ADDSTRING, 0, (LPARAM)label.c_str());
+        }
+
+        y += 108;
+        CreateWindowA("STATIC", zh ? "\xE4\xB8\xBB\xE6\x9C\xBA:" : "Host:",
+            WS_CHILD | WS_VISIBLE, 15, y + 3, 40, 20, hwnd, NULL, NULL, NULL);
+        g_hostEdit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            55, y, 120, 24, hwnd, (HMENU)1003, NULL, NULL);
+        CreateWindowA("STATIC", zh ? "\xE8\xB7\xAF\xE5\xBE\x84:" : "Path:",
+            WS_CHILD | WS_VISIBLE, 180, y + 3, 40, 20, hwnd, NULL, NULL, NULL);
+        g_pathEdit = CreateWindowA("EDIT", "Vimouse.exe", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            220, y, 135, 24, hwnd, (HMENU)1004, NULL, NULL);
+
+        y += 30;
+        CreateWindowA("BUTTON", zh ? "\xE6\xB7\xBB\xE5\x8A\xA0" : "Add",
+            WS_CHILD | WS_VISIBLE, 15, y, 60, 26, hwnd, (HMENU)1010, NULL, NULL);
+        CreateWindowA("BUTTON", zh ? "\xE5\x88\xA0\xE9\x99\xA4" : "Remove",
+            WS_CHILD | WS_VISIBLE, 80, y, 60, 26, hwnd, (HMENU)1011, NULL, NULL);
+
+        y += 40;
+        CreateWindowA("STATIC", zh ? "\xE5\xBF\xAB\xE6\x8D\xB7\xE9\x94\xAE:  Ctrl+J = \xE6\x9C\xAC\xE5\x9C\xB0   Ctrl+Alt+J = \xE8\xBF\x9C\xE7\xA8\x8B"
+            : "Hotkeys:  Ctrl+J = Local   Ctrl+Alt+J = Remote",
+            WS_CHILD | WS_VISIBLE, 15, y, 350, 20, hwnd, NULL, NULL, NULL);
+
+        y += 35;
+        CreateWindowA("BUTTON", zh ? "\xE4\xBF\x9D\xE5\xAD\x98" : "Save",
+            WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 200, y, 70, 28, hwnd, (HMENU)IDOK, NULL, NULL);
+        CreateWindowA("BUTTON", zh ? "\xE5\x8F\x96\xE6\xB6\x88" : "Cancel",
+            WS_CHILD | WS_VISIBLE, 280, y, 70, 28, hwnd, (HMENU)IDCANCEL, NULL, NULL);
+        break;
+    }
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case 1010: // Add
+        {
+            char host[256] = {}, path[512] = {};
+            GetWindowTextA(g_hostEdit, host, sizeof(host));
+            GetWindowTextA(g_pathEdit, path, sizeof(path));
+            if (strlen(host) > 0) {
+                RemoteHostInfo info = { host, strlen(path) > 0 ? path : "Vimouse.exe" };
+                g_remoteHosts.push_back(info);
+                std::string label = info.host + " | " + info.exePath;
+                SendMessageA(g_hostListBox, LB_ADDSTRING, 0, (LPARAM)label.c_str());
+                SetWindowTextA(g_hostEdit, "");
+            }
+            break;
+        }
+        case 1011: // Remove
+        {
+            int sel = (int)SendMessage(g_hostListBox, LB_GETCURSEL, 0, 0);
+            if (sel != LB_ERR && sel < (int)g_remoteHosts.size()) {
+                g_remoteHosts.erase(g_remoteHosts.begin() + sel);
+                SendMessage(g_hostListBox, LB_DELETESTRING, sel, 0);
+            }
+            break;
+        }
+        case IDOK:
+            SetAutoStart(SendMessage(g_autoStartCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            SaveRemoteHosts();
+            DestroyWindow(hwnd);
+            g_settingsWnd = NULL;
+            break;
+        case IDCANCEL:
+            DestroyWindow(hwnd);
+            g_settingsWnd = NULL;
+            break;
+        }
+        break;
+    case WM_DESTROY:
+        g_settingsWnd = NULL;
+        break;
+    default:
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+    return 0;
+}
+
+void ShowSettingsDialog(HWND parent) {
+    if (g_settingsWnd) { SetForegroundWindow(g_settingsWnd); return; }
+
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXA wc = { sizeof(wc) };
+        wc.lpfnWndProc = SettingsWndProc;
+        wc.hInstance = GetModuleHandle(NULL);
+        wc.lpszClassName = "VimouseSettings";
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        RegisterClassExA(&wc);
+        registered = true;
+    }
+
+    bool zh = IsSystemChinese();
+    g_settingsWnd = CreateWindowExA(WS_EX_TOOLWINDOW,
+        "VimouseSettings", zh ? "Vimouse \xE8\xAE\xBE\xE7\xBD\xAE" : "Vimouse Settings",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        CW_USEDEFAULT, CW_USEDEFAULT, 390, 370,
+        parent, NULL, GetModuleHandle(NULL), NULL);
+    ShowWindow(g_settingsWnd, SW_SHOW);
+    SetForegroundWindow(g_settingsWnd);
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // CLI 模式检测：-c "command" 或 -f script.txt
     if (lpCmdLine && lpCmdLine[0] != '\0') {
@@ -3094,9 +3472,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         freopen_s(&fout, "CONOUT$", "w", stdout);
         freopen_s(&ferr, "CONOUT$", "w", stderr);
 
+        if (args.find("--pipe-stdin") != std::string::npos) {
+            return RunPipeStdinBridge();
+        }
         if (args.substr(0, 2) == "-c") {
             std::string cmd = args.substr(2);
-            // 去掉前导空格和引号
             size_t start = cmd.find_first_not_of(" \t\"");
             if (start != std::string::npos) cmd = cmd.substr(start);
             size_t end = cmd.find_last_not_of(" \t\"");
