@@ -1452,7 +1452,6 @@ LRESULT CALLBACK IndicatorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             SelectObject(hdc, oldFont);
         }
 
-        SelectObject(hdc, oldFont);
         EndPaint(hwnd, &ps);
         break;
     }
