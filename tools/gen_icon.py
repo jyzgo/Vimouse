@@ -168,11 +168,12 @@ for y in range(margin, SIZE - margin, 4):
             )
 
 # --- Save ---
-out_png = "assets/icon.png"
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
+out_png = os.path.join(ASSETS, "icon.png")
 img.save(out_png, 'PNG')
 print(f"Saved PNG: {out_png}")
 
-out_ico = "assets/Vimouse.ico"
+out_ico = os.path.join(ASSETS, "Vimouse.ico")
 sizes = [(16, 16), (32, 32), (48, 48), (256, 256)]
 img.save(out_ico, format='ICO', sizes=sizes)
 print(f"Saved ICO: {out_ico}")

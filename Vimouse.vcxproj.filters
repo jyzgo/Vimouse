@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Core">
+      <UniqueIdentifier>{a1000000-0000-4000-8000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Input">
+      <UniqueIdentifier>{a1000000-0000-4000-8000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="UI">
+      <UniqueIdentifier>{a1000000-0000-4000-8000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IPC">
+      <UniqueIdentifier>{a1000000-0000-4000-8000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources">
+      <UniqueIdentifier>{a1000000-0000-4000-8000-000000000005}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Main.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="src\State.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="src\Config.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="src\Keymap.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="src\Screens.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="src\Util.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="src\Hook.cpp"><Filter>Input</Filter></ClCompile>
+    <ClCompile Include="src\Input.cpp"><Filter>Input</Filter></ClCompile>
+    <ClCompile Include="src\Mover.cpp"><Filter>Input</Filter></ClCompile>
+    <ClCompile Include="src\History.cpp"><Filter>Input</Filter></ClCompile>
+    <ClCompile Include="src\Cursor.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\Overlay.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\Indicator.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\Hint.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\Grid.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\Tags.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\KeyOsd.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\HelpOverlay.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\SettingsDialog.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\PipeServer.cpp"><Filter>IPC</Filter></ClCompile>
+    <ClCompile Include="src\CommandHandler.cpp"><Filter>IPC</Filter></ClCompile>
+    <ClCompile Include="src\Remote.cpp"><Filter>IPC</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\State.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="src\Config.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="src\Keymap.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="src\Screens.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="src\Util.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="src\resource.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="src\Hook.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="src\Input.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="src\Mover.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="src\History.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="src\Cursor.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\Overlay.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\Indicator.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\Hint.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\Grid.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\Tags.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\KeyOsd.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\HelpOverlay.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\SettingsDialog.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\Common.h"><Filter>IPC</Filter></ClInclude>
+    <ClInclude Include="src\PipeServer.h"><Filter>IPC</Filter></ClInclude>
+    <ClInclude Include="src\CommandHandler.h"><Filter>IPC</Filter></ClInclude>
+    <ClInclude Include="src\Remote.h"><Filter>IPC</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="src\Vimouse.rc"><Filter>Resources</Filter></ResourceCompile>
+    <Image Include="assets\Vimouse.ico"><Filter>Resources</Filter></Image>
+  </ItemGroup>
+</Project>

@@ -1,5 +1,7 @@
 #include "CommandHandler.h"
+#include "Common.h"
 #include <sstream>
+#include <vector>
 #include <thread>
 #include <chrono>
 
@@ -368,13 +370,13 @@ std::string HandleCommand(const std::string& command) {
 
     // activate - 激活 Vimouse 键盘控制
     if (cmd == "activate") {
-        g_isActive = true;
+        if (g_hwnd) PostMessage(g_hwnd, WM_APP_SET_ACTIVE, 1, 0);   // 切到主线程执行（涉及窗口/光标）
         return "OK";
     }
 
     // deactivate - 停用 Vimouse 键盘控制
     if (cmd == "deactivate") {
-        g_isActive = false;
+        if (g_hwnd) PostMessage(g_hwnd, WM_APP_SET_ACTIVE, 0, 0);
         return "OK";
     }
 
