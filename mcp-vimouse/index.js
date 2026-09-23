@@ -234,7 +234,7 @@ function saveHubIndex(index) {
 }
 
 server.tool("open_unity_project", "Open a Unity project via Unity Hub. Uses cached index for fast lookup, falls back to OCR scan if needed.", {
-  project: z.string().describe("Project name or path keyword (e.g. 'MyGame', 'Projects', 'Template')"),
+  project: z.string().describe("Project name or path keyword (e.g. 'MyGame', 'Projects')"),
   rescan: z.boolean().optional().default(false).describe("Force OCR rescan of Unity Hub"),
 }, async ({ project, rescan }) => {
   const index = loadHubIndex();

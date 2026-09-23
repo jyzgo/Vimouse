@@ -2,8 +2,7 @@
   "mcpServers": {
     "vimouse": {
       "command": "node",
-      "args": ["mcp-vimouse/index.js"],
-      "cwd": "."
+      "args": ["mcp-vimouse/index.js"]
     }
   }
 }

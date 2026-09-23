@@ -14,81 +14,31 @@ import time
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "remote-panel.json")
 
 def _get_default_config():
-    """根据机器名返回对应默认配置"""
-    hostname = os.environ.get("COMPUTERNAME", "").upper()
-    if hostname == "OFFICE-PC":
-        # 公司电脑
-        return {
-            "ssh_key": "~/.ssh/id_ed25519",
-            "pwsh": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-            "local_tunnel_port": 59124,
-            "vimouse_port": 59123,
-            "machines": [
-                {
-                    "name": "家里电脑",
-                    "host": "home-pc.example",
-                    "user": "user",
-                    "color": "#2d5a2d",
-                    "network": "tailscale"
-                },
-                {
-                    "name": "Alpha Mac",
-                    "host": "",
-                    "user": "",
-                    "color": "#5a2d5a",
-                    "network": "tailscale",
-                    "disabled": True
-                },
-                {
-                    "name": "Release Mac",
-                    "host": "",
-                    "user": "",
-                    "color": "#5a4a2d",
-                    "network": "tailscale",
-                    "disabled": True
-                }
-            ]
-        }
-    else:
-        # 家里电脑 (默认)
-        return {
-            "ssh_key": "~/.ssh/id_ed25519",
-            "pwsh": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-            "local_tunnel_port": 59124,
-            "vimouse_port": 59123,
-            "machines": [
-                {
-                    "name": "公司电脑",
-                    "host": "office-pc.example",
-                    "user": "user",
-                    "color": "#2d5a2d",
-                    "network": "tailscale"
-                },
-                {
-                    "name": "公司电脑(VPN)",
-                    "host": "office-pc-vpn.example",
-                    "user": "user",
-                    "color": "#2d4a5a",
-                    "network": "vpn"
-                },
-                {
-                    "name": "Alpha Mac",
-                    "host": "",
-                    "user": "",
-                    "color": "#5a2d5a",
-                    "network": "tailscale",
-                    "disabled": True
-                },
-                {
-                    "name": "Release Mac",
-                    "host": "",
-                    "user": "",
-                    "color": "#5a4a2d",
-                    "network": "tailscale",
-                    "disabled": True
-                }
-            ]
-        }
+    """首次运行写入的模板配置；把 host/user 填成你自己的机器后再用。"""
+    return {
+        "ssh_key": os.path.expanduser("~/.ssh/id_ed25519"),
+        "pwsh": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        "local_tunnel_port": 59124,
+        "vimouse_port": 59123,
+        "machines": [
+            {
+                "name": "Desktop",
+                "host": "",
+                "user": "",
+                "color": "#2d5a2d",
+                "network": "lan",
+                "disabled": True
+            },
+            {
+                "name": "Laptop",
+                "host": "",
+                "user": "",
+                "color": "#2d4a5a",
+                "network": "vpn",
+                "disabled": True
+            }
+        ]
+    }
 
 
 def load_config():

@@ -1,13 +1,13 @@
 """
 Wake-on-LAN 唤醒工具
-用法: python wol.py [MAC地址]
-默认唤醒家里电脑 (home-pc)
+用法: python wol.py <MAC地址 | 别名>
+在 TARGETS 里填上自己机器的别名 -> MAC，即可 python wol.py <别名>
 """
 import socket
 import sys
 
 TARGETS = {
-    "home-pc": "00:11:22:33:44:55",
+    # "desktop": "00:11:22:33:44:55",
 }
 
 def send_wol(mac_str, broadcast="255.255.255.255", port=9):
@@ -24,12 +24,10 @@ def send_wol(mac_str, broadcast="255.255.255.255", port=9):
     return True
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        mac = sys.argv[1]
-    else:
-        mac = TARGETS.get("home-pc", "")
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    mac = TARGETS.get(arg, arg)
     if mac:
         send_wol(mac)
     else:
-        print("Usage: python wol.py <MAC>")
+        print("Usage: python wol.py <MAC | alias>")
         print(f"Known targets: {TARGETS}")
