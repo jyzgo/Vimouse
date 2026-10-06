@@ -18,6 +18,32 @@ namespace {
 
 constexpr LRESULT kSwallow = 1;
 
+unsigned g_arrowHeld = 0;   // 方向键模式下当前已注入"按下"的方向（MoveDir 位）
+
+WORD ArrowVkOf(unsigned bit) {
+    switch (bit) {
+    case MV_LEFT: return VK_LEFT; case MV_DOWN: return VK_DOWN;
+    case MV_UP: return VK_UP;     case MV_RIGHT: return VK_RIGHT;
+    }
+    return 0;
+}
+
+void SendArrow(WORD vk, bool up) {
+    INPUT in = {};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wVk = vk;
+    in.ki.wScan = (WORD)MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    in.ki.dwFlags = KEYEVENTF_EXTENDEDKEY | (up ? KEYEVENTF_KEYUP : 0);
+    SendInput(1, &in, sizeof(INPUT));
+}
+
+// 方向键模式下的直线移动键 → 对应方向位（对角键不映射）
+unsigned ArrowBitOf(DWORD vk) {
+    unsigned bits = MoveBitOfVk((WORD)vk) & (MV_LEFT | MV_DOWN | MV_UP | MV_RIGHT);
+    for (unsigned b : { MV_LEFT, MV_DOWN, MV_UP, MV_RIGHT }) if (bits & b) return b;   // 同一键绑多个方向时取第一个
+    return 0;
+}
+
 bool IsModifierVk(DWORD vk) {
     switch (vk) {
     case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL:
@@ -212,20 +238,39 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     const bool isUp = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
 
     if (vk == VK_PACKET) return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);   // Unicode 注入（管道 type 命令）直接放行
+    // 方向键模式：自己注入的方向键必须放行，避免被再次处理
+    if (g_arrowMode && (kb->flags & LLKHF_INJECTED)) return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 
     Modifiers m = CurrentMods();
     if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) g_shiftPressed = isDown;
 
     // 按键 OSD：激活状态下显示；未激活时只显示开关快捷键本身
-    bool isToggleChord = IsAction(Action::Toggle, (WORD)vk, m) || IsAction(Action::ToggleCenter, (WORD)vk, m) || IsAction(Action::ToggleRemote, (WORD)vk, m);
-    if (isDown && (g_isActive || isToggleChord)) KeyOsd_KeyDown((WORD)vk, m);
+    bool isToggleChord = IsAction(Action::Toggle, (WORD)vk, m) || IsAction(Action::ToggleCenter, (WORD)vk, m) ||
+                         IsAction(Action::ToggleRemote, (WORD)vk, m) || IsAction(Action::ToggleArrow, (WORD)vk, m);
+    if (isDown && (g_isActive || g_arrowMode || isToggleChord)) KeyOsd_KeyDown((WORD)vk, m);
     else if (isUp) KeyOsd_KeyUp((WORD)vk);
 
     if (IsModifierVk(vk) || Down(VK_LWIN) || Down(VK_RWIN))
         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 
     bool swallow = false;
-    if (isDown) {
+    if ((g_isActive || g_arrowMode) && !g_modeHintSessionOff && g_settings.modeHint &&
+        IsAction(Action::HideModeHint, (WORD)vk, m)) {
+        // 只在提示框正显示时吞掉；本次运行不再显示，托盘右键菜单可恢复
+        if (isDown) g_modeHintSessionOff = true;
+        swallow = true;
+    } else if (isDown && IsAction(Action::ToggleArrow, (WORD)vk, m)) {
+        SetArrowMode(!g_arrowMode);
+        swallow = true;
+    } else if (g_arrowMode && (isDown || isUp) && ArrowBitOf(vk) &&
+               !IsAction(Action::Toggle, (WORD)vk, m) && !IsAction(Action::ToggleCenter, (WORD)vk, m) &&
+               !IsAction(Action::ToggleRemote, (WORD)vk, m)) {
+        // 移动键 → 方向键。修饰键保持物理状态，所以 Shift+h = Shift+←（选择），Ctrl+h = Ctrl+←
+        unsigned bit = ArrowBitOf(vk);
+        if (isDown) { SendArrow(ArrowVkOf(bit), false); g_arrowHeld |= bit; }
+        else if (g_arrowHeld & bit) { SendArrow(ArrowVkOf(bit), true); g_arrowHeld &= ~bit; }   // 开关键残留的 key up 不发
+        swallow = true;
+    } else if (isDown) {
         if (IsAction(Action::ToggleRemote, (WORD)vk, m))      { ToggleRemote(); swallow = true; }
         else if (IsAction(Action::ToggleCenter, (WORD)vk, m)) { ToggleActive(true); swallow = true; }
         else if (IsAction(Action::Toggle, (WORD)vk, m))       { ToggleActive(false); swallow = true; }
@@ -275,6 +320,7 @@ void SetActive(bool active) {
     if (g_isActive == active) { UpdateIndicatorPosition(); return; }
     g_isActive = active;
     if (active) {
+        if (g_arrowMode) SetArrowMode(false);   // 两种模式互斥
         RefreshScreens();
         SetVimouseCursor();
         ShowTagWindowsNonInteractive();
@@ -290,6 +336,18 @@ void SetActive(bool active) {
         HideAllTagWindows();
         RestoreSystemCursor();
     }
+    UpdateIndicatorPosition();
+}
+
+void SetArrowMode(bool on) {
+    if (on && g_isActive) SetActive(false);   // 进入方向键模式前退出鼠标模式
+    if (!on) {
+        // 释放仍处于按下状态的方向键，避免卡键
+        for (unsigned b : { MV_LEFT, MV_DOWN, MV_UP, MV_RIGHT })
+            if (g_arrowHeld & b) SendArrow(ArrowVkOf(b), true);
+        g_arrowHeld = 0;
+    }
+    g_arrowMode = on;
     UpdateIndicatorPosition();
 }
 

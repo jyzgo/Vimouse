@@ -39,6 +39,7 @@ static std::vector<std::wstring> Lines(bool zh) {
     L.push_back(zh ? L" Vimouse 快速参考" : L" Vimouse Quick Ref");
     L.push_back(L" ─────────────────────");
     L.push_back(L" " + K(Action::Toggle) + (zh ? L"  开关激活" : L"  Toggle ON/OFF"));
+    L.push_back(L" " + K(Action::ToggleArrow) + (zh ? L"  方向键模式(" : L"  Arrow mode (") + mv + L"=←↓↑→)");
     L.push_back(L" " + mv + (zh ? L"  移动(长按加速)" : L"  Move (hold=accel)"));
     L.push_back(zh ? L" Shift+移动  精确1像素" : L" Shift+move  Precise 1px");
     L.push_back(L" " + dg + (zh ? L"  对角移动" : L"  Diagonal"));

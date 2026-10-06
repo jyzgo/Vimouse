@@ -18,6 +18,8 @@ const ActionMeta kMeta[] = {
     { Action::Toggle,        "toggle",         L"开关 Vimouse",        L"Toggle Vimouse",         K('J', true) },
     { Action::ToggleCenter,  "toggle_center",  L"开关并居中光标",      L"Toggle + center cursor", K('K', true, true) },
     { Action::ToggleRemote,  "toggle_remote",  L"开关远程模式",        L"Toggle remote mode",     K('J', true, true) },
+    { Action::ToggleArrow,   "toggle_arrow",   L"开关方向键模式(移动键→方向键)", L"Toggle arrow-key mode (move keys → arrows)", K('H', true, true) },
+    { Action::HideModeHint,  "hide_mode_hint", L"临时关闭右侧提示框(本次运行)", L"Hide right-side hints (this session)", K('P', true, true) },
     { Action::MoveLeft,      "move_left",      L"左移",                L"Move left",              K('H') },
     { Action::MoveDown,      "move_down",      L"下移",                L"Move down",              K('J') },
     { Action::MoveUp,        "move_up",        L"上移",                L"Move up",                K('K') },

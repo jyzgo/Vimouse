@@ -8,3 +8,4 @@ void UninstallKeyboardHook();
 void SetActive(bool active);        // 激活/停用（含光标、标签、指示器等副作用）
 void ToggleActive(bool centerCursor);
 void ToggleRemote();
+void SetArrowMode(bool on);         // 方向键模式开关（开启时会退出鼠标模式）

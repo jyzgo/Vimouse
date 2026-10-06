@@ -12,6 +12,7 @@
 #include "Indicator.h"
 #include "KeyOsd.h"
 #include "HelpOverlay.h"
+#include "ModeHint.h"
 #include "SettingsDialog.h"
 #include "Hook.h"
 #include "PipeServer.h"
@@ -60,6 +61,13 @@ static void ShowTrayMenu(HWND hwnd) {
 
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(menu, g_settings.keyOsd ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_KEYOSD, zh ? L"按键提示 (屏幕底部)" : L"Key OSD (bottom of screen)");
+    {
+        bool shown = g_settings.modeHint && !g_modeHintSessionOff;
+        std::wstring label = zh ? L"模式按键提示框 (屏幕右侧)" : L"Mode key hints (right side)";
+        if (g_settings.modeHint && g_modeHintSessionOff)
+            label += zh ? L" — 已临时隐藏, 点此恢复" : L" — hidden for now, click to restore";
+        AppendMenuW(menu, shown ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_MODEHINT, label.c_str());
+    }
     AppendMenuW(menu, g_helpVisible ? MF_CHECKED : MF_UNCHECKED, IDM_TRAY_HELPWIN, zh ? L"悬浮帮助" : L"Help overlay");
     AppendMenuW(menu, MF_STRING, IDM_TRAY_HELP, zh ? L"操作指南" : L"Quick guide");
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
@@ -81,6 +89,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         CreateIndicatorWindow();
         CreateHelpWindow();
         KeyOsd_Create();
+        ModeHint_Create();
         LoadTags();
         LoadRemoteHosts();
         StartPipeServer();
@@ -112,6 +121,10 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         else if (id == IDM_TRAY_HELP)     ShowHelpDialog(hwnd);
         else if (id == IDM_TRAY_HELPWIN)  ToggleHelpWindow();
         else if (id == IDM_TRAY_KEYOSD)   { g_settings.keyOsd = !g_settings.keyOsd; SaveSettings(); if (!g_settings.keyOsd) KeyOsd_HideNow(); }
+        else if (id == IDM_TRAY_MODEHINT) {
+            if (g_modeHintSessionOff) g_modeHintSessionOff = false;   // 临时隐藏 → 恢复，不动持久设置
+            else { g_settings.modeHint = !g_settings.modeHint; SaveSettings(); }
+        }
         else if (id == IDM_TRAY_SETTINGS) ShowSettingsDialog(hwnd);
         else if (id == IDM_TRAY_EXIT)     DestroyWindow(hwnd);
         else if (id == IDM_TRAY_REMOTE_BASE) { StopRemoteMode(); UpdateIndicatorPosition(); }
@@ -134,6 +147,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (g_hintWindow)      DestroyWindow(g_hintWindow);
         if (g_indicatorWindow) DestroyWindow(g_indicatorWindow);
         if (g_helpWindow)      DestroyWindow(g_helpWindow);
+        ModeHint_Destroy();
         DestroyAllTags();
         PostQuitMessage(0);
         return 0;

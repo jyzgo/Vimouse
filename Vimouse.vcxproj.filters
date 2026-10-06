@@ -32,6 +32,7 @@
     <ClCompile Include="src\Overlay.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\Indicator.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\Hint.cpp"><Filter>UI</Filter></ClCompile>
+    <ClCompile Include="src\ModeHint.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\Grid.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\Tags.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\KeyOsd.cpp"><Filter>UI</Filter></ClCompile>
@@ -56,6 +57,7 @@
     <ClInclude Include="src\Overlay.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\Indicator.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\Hint.h"><Filter>UI</Filter></ClInclude>
+    <ClInclude Include="src\ModeHint.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\Grid.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\Tags.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\KeyOsd.h"><Filter>UI</Filter></ClInclude>

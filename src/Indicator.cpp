@@ -29,7 +29,12 @@ static LRESULT CALLBACK IndicatorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         if (!g_fontBig) g_fontBig = MakeFont(20, FW_BOLD, L"Consolas", FIXED_PITCH | FF_MODERN);
         FillRect(db.mem, &db.rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
 
-        if (g_remoteMode) {
+        if (g_arrowMode && !g_isActive) {
+            HGDIOBJ old = SelectObject(db.mem, g_font);
+            SetTextColor(db.mem, RGB(255, 120, 220));
+            DrawTextA(db.mem, "ARW", 3, &db.rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(db.mem, old);
+        } else if (g_remoteMode) {
             HGDIOBJ old = SelectObject(db.mem, g_font);
             RECT rl = db.rc; rl.right -= 18;
             SetTextColor(db.mem, RGB(100, 200, 255));
@@ -85,14 +90,20 @@ void RefreshIndicator() {
 
 void UpdateIndicatorPosition() {
     if (!g_indicatorWindow) return;
-    bool show = g_isActive && !g_hintMode && !g_gridMode;
+    bool show = (g_isActive && !g_hintMode && !g_gridMode) || g_arrowMode;
     if (!show) { ShowWindow(g_indicatorWindow, SW_HIDE); return; }
 
     POINT p; GetCursorPos(&p);
-    if (g_clickFlash) {
+    if (g_arrowMode && !g_isActive) {
+        // 方向键模式下鼠标自由移动，标签固定在当前屏幕右下角
+        RECT sr = ScreenRectAt(GetCurrentScreenIndex());
+        SetWindowPos(g_indicatorWindow, HWND_TOPMOST, sr.right - 70, sr.bottom - 60, 50, 16,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        RefreshIndicator();
+    } else if (g_clickFlash) {
         RefreshIndicator();
     } else {
-        int w = g_remoteMode ? 50 : 22;
+        int w = (g_remoteMode || (g_arrowMode && !g_isActive)) ? 50 : 22;
         SetWindowPos(g_indicatorWindow, HWND_TOPMOST, p.x + 12, p.y + 12, w, 16,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
         RefreshIndicator();

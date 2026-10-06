@@ -4,7 +4,7 @@
 #include <string>
 
 enum class Action {
-    Toggle, ToggleCenter, ToggleRemote,
+    Toggle, ToggleCenter, ToggleRemote, ToggleArrow, HideModeHint,
     MoveLeft, MoveDown, MoveUp, MoveRight,
     MoveUpLeft, MoveUpRight, MoveDownLeft, MoveDownRight,
     ClickLeft, ClickRight, ClickMiddle, DragToggle, ClickAndTag,

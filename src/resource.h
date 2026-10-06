@@ -8,6 +8,7 @@
 #define IDM_TRAY_HELPWIN        113
 #define IDM_TRAY_SETTINGS       114
 #define IDM_TRAY_KEYOSD         115
+#define IDM_TRAY_MODEHINT       116
 #define IDM_TRAY_REMOTE_BASE    200   // 200 = 断开, 201.. = 主机 N
 
 #define WM_TRAYICON             (WM_USER + 1)

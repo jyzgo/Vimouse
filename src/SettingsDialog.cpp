@@ -16,7 +16,7 @@ namespace {
 enum Ctl : int {
     ID_TAB = 2000,
     // 常规
-    ID_AUTOSTART = 2100, ID_KEYOSD, ID_CUSTOMCURSOR,
+    ID_AUTOSTART = 2100, ID_KEYOSD, ID_CUSTOMCURSOR, ID_MODEHINT,
     // 快捷键
     ID_KEYLIST = 2200, ID_KEYCAPTURE, ID_KEYRESET_ONE, ID_KEYRESET_ALL, ID_KEYHINT,
     // 远程
@@ -27,7 +27,7 @@ enum Ctl : int {
 
 HWND g_dlg = NULL;
 HWND g_tab = NULL;
-HWND g_autoStart, g_keyOsd, g_customCursor;
+HWND g_autoStart, g_keyOsd, g_customCursor, g_modeHint;
 HWND g_keyList, g_keyCapture, g_keyResetOne, g_keyResetAll, g_keyHint;
 HWND g_hostList, g_hostEdit, g_pathEdit, g_hostAdd, g_hostDel, g_hostLbl1, g_hostLbl2, g_hostLbl3;
 HWND g_pages[3][12]; int g_pageCount[3] = { 0, 0, 0 };
@@ -110,7 +110,8 @@ LRESULT CALLBACK CaptureBtnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         c.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         // 非 Toggle 类动作不允许带 Ctrl/Alt（会和系统快捷键冲突）
         Action a = (Action)g_captureRow;
-        bool isToggle = (a == Action::Toggle || a == Action::ToggleCenter || a == Action::ToggleRemote);
+        bool isToggle = (a == Action::Toggle || a == Action::ToggleCenter || a == Action::ToggleRemote || a == Action::ToggleArrow ||
+                         a == Action::HideModeHint);
         if (!isToggle && (c.ctrl || c.alt)) {
             MessageBoxW(g_dlg, T(L"普通动作请使用不带 Ctrl/Alt 的按键。", L"Use a key without Ctrl/Alt for regular actions."), L"Vimouse", MB_OK | MB_ICONWARNING);
             return 0;
@@ -140,7 +141,8 @@ void BuildGeneral() {
     int x = 20, y = 50;
     g_autoStart = Make(0, L"BUTTON", T(L"开机自动启动", L"Run at startup"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 380, 24, ID_AUTOSTART); y += 32;
     g_keyOsd = Make(0, L"BUTTON", T(L"屏幕底部显示按键提示（松开后渐隐）", L"Show pressed keys at bottom of screen (fades on release)"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 400, 24, ID_KEYOSD); y += 32;
-    g_customCursor = Make(0, L"BUTTON", T(L"激活时使用十字准星光标", L"Use crosshair cursor while active"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 380, 24, ID_CUSTOMCURSOR); y += 40;
+    g_customCursor = Make(0, L"BUTTON", T(L"激活时使用十字准星光标", L"Use crosshair cursor while active"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 380, 24, ID_CUSTOMCURSOR); y += 32;
+    g_modeHint = Make(0, L"BUTTON", T(L"屏幕右侧显示当前模式的按键提示框", L"Show current-mode key hints on the right side"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 400, 24, ID_MODEHINT); y += 40;
     Make(0, L"STATIC", T(L"配置目录: ", L"Config folder: "), WS_VISIBLE, x, y, 90, 20, 0);
     std::wstring dir = Utf8ToWide(GetConfigDir());
     Make(0, L"EDIT", dir.c_str(), WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL, x + 90, y - 2, 320, 22, 0);
@@ -148,6 +150,7 @@ void BuildGeneral() {
     SendMessage(g_autoStart, BM_SETCHECK, IsAutoStartEnabled() ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessage(g_keyOsd, BM_SETCHECK, g_settings.keyOsd ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessage(g_customCursor, BM_SETCHECK, g_settings.customCursor ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessage(g_modeHint, BM_SETCHECK, g_settings.modeHint ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 void BuildKeys() {
@@ -191,6 +194,7 @@ void OnSave() {
     g_settings.keyOsd = SendMessage(g_keyOsd, BM_GETCHECK, 0, 0) == BST_CHECKED;
     bool cursorBefore = g_settings.customCursor;
     g_settings.customCursor = SendMessage(g_customCursor, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    g_settings.modeHint = SendMessage(g_modeHint, BM_GETCHECK, 0, 0) == BST_CHECKED;
     SaveSettings();
 
     for (int i = 0; i < (int)Action::Count; i++) g_keymap[i] = g_editMap[i];

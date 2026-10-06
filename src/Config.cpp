@@ -54,6 +54,7 @@ void LoadSettings() {
     auto kv = ReadIni(ConfigFilePath("settings.ini"));
     g_settings.keyOsd = IniBool(kv, "key_osd", false);
     g_settings.customCursor = IniBool(kv, "custom_cursor", true);
+    g_settings.modeHint = IniBool(kv, "mode_hint", true);
 }
 
 void SaveSettings() {
@@ -61,6 +62,7 @@ void SaveSettings() {
     f << "# Vimouse settings\n";
     f << "key_osd=" << (g_settings.keyOsd ? 1 : 0) << "\n";
     f << "custom_cursor=" << (g_settings.customCursor ? 1 : 0) << "\n";
+    f << "mode_hint=" << (g_settings.modeHint ? 1 : 0) << "\n";
 }
 
 void LoadRemoteHosts() {

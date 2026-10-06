@@ -15,6 +15,8 @@
 | 开关 | `Ctrl+J` | 切换 Vimouse |
 | | `Ctrl+Alt+K` | 切换并把光标放到屏幕中心 |
 | | `Ctrl+Alt+J` | 切换远程模式（连接设置里的第一台主机） |
+| | `Ctrl+Alt+H` | 方向键模式：移动键 `h/j/k/l` 发送 `←/↓/↑/→`（给没有方向键的键盘用；右下角显示 `ARW`，再按一次退出） |
+| | `Ctrl+Alt+P` | 临时隐藏右侧模式按键提示框（本次运行内不再出现；托盘右键菜单「模式按键提示框」点一下恢复） |
 | | `Esc` | 退出当前模式 / 退出 Vimouse |
 | | `Enter` | 左键点击 + 退出 |
 | 移动 | `h/j/k/l` | 左/下/上/右，长按加速 |
@@ -42,12 +44,13 @@
 - **启用键盘控制** — 开关
 - **远程连接** — 有配置主机时出现
 - **按键提示** — 在当前屏幕底部居中显示正在按的键，松开后约 0.25s 渐隐
+- **模式按键提示框**（默认开启）— 屏幕右侧半透明、点击可穿透的小框，按当前模式（鼠标 / Grid / Hint / 滚轮 / 标签 / 方向键）列出可用按键；未激活时自动隐藏。`Ctrl+Alt+P` 临时隐藏到本次退出，托盘菜单可恢复
 - **悬浮帮助** — 可拖动的半透明速查窗（内容随你的键位配置变化，位置持久化）
 - **操作指南** / **设置…** / **退出**
 
 ### 设置窗口
 
-- **常规**：开机自启、按键提示、激活时是否使用十字准星光标
+- **常规**：开机自启、按键提示、激活时是否使用十字准星光标、模式按键提示框（`settings.ini` 的 `mode_hint`）
 - **快捷键**：选一行 → 点「修改按键」→ 按下新键；有冲突会提示交换；可单项 / 全部恢复默认
 - **远程**：SSH 主机列表（`host|远端 Vimouse.exe 路径`）
 
@@ -127,7 +130,7 @@ mcp-vimouse/ MCP server (Node)
 | `r/e` | Prev / next position history |
 | `Enter` | Click + exit · `Esc` exit |
 
-Tray menu: **Key OSD** (shows pressed keys at the bottom of the screen, fades on release), help overlay, settings (startup, cursor, keymap, SSH remote hosts).
+Tray menu: **Key OSD** (shows pressed keys at the bottom of the screen, fades on release), **mode key hints** (click-through panel on the right listing the keys for the current mode; on by default), help overlay, settings (startup, cursor, keymap, SSH remote hosts).
 
 Config lives in `%USERPROFILE%\.vimouse\` (`settings.ini`, `keymap.ini`, `tags.txt`, `remote_hosts.txt`).
 

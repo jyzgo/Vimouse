@@ -29,6 +29,7 @@ enum MoveDir : unsigned {
 struct Settings {
     bool keyOsd       = false;  // 屏幕底部按键提示
     bool customCursor = true;   // 激活时使用十字准星光标
+    bool modeHint     = true;   // 屏幕右侧显示当前模式可用按键
 };
 
 // 主窗口自定义消息
@@ -38,11 +39,13 @@ struct Settings {
 extern HHOOK g_keyboardHook;
 extern HWND  g_hwnd;                // 隐藏主窗口
 extern bool  g_isActive;
+extern bool  g_modeHintSessionOff;  // 快捷键临时关掉右侧提示框，本次运行有效（托盘菜单可恢复）
 extern bool  g_hintMode;
 extern bool  g_gridMode;
 extern bool  g_miniGridMode;        // hint 之后的单层微调 grid
 extern bool  g_wheelMode;
 extern bool  g_tagMode;
+extern bool  g_arrowMode;           // 方向键模式：移动键 h/j/k/l → 发送 ←↓↑→（与鼠标模式互斥）
 
 // ---- 修饰键（移动线程读取 shift）----
 extern std::atomic<bool> g_shiftPressed;

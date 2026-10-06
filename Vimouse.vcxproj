@@ -84,6 +84,7 @@
     <ClInclude Include="src\Grid.h" />
     <ClInclude Include="src\HelpOverlay.h" />
     <ClInclude Include="src\Hint.h" />
+    <ClInclude Include="src\ModeHint.h" />
     <ClInclude Include="src\History.h" />
     <ClInclude Include="src\Hook.h" />
     <ClInclude Include="src\Indicator.h" />
@@ -108,6 +109,7 @@
     <ClCompile Include="src\Grid.cpp" />
     <ClCompile Include="src\HelpOverlay.cpp" />
     <ClCompile Include="src\Hint.cpp" />
+    <ClCompile Include="src\ModeHint.cpp" />
     <ClCompile Include="src\History.cpp" />
     <ClCompile Include="src\Hook.cpp" />
     <ClCompile Include="src\Indicator.cpp" />
