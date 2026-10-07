@@ -10,6 +10,7 @@
 #include <uiautomation.h>
 #include <dwmapi.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -85,6 +86,26 @@ bool AddUnique(std::vector<RECT>& out, const RECT& r) {
 
 template <class T> void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
+// 扫描日志：%TEMP%\vimouse_scan.log，每次扫描一行（时间、总耗时、各窗口 类名:命中/总数@定位+查找耗时）。
+// 用来排查"有时快有时慢"到底卡在哪个窗口；超过 256KB 就清空重写。
+void AppendScanLog(const std::string& line) {
+    wchar_t dir[MAX_PATH] = {};
+    if (!GetTempPathW(MAX_PATH, dir)) return;
+    std::wstring path = std::wstring(dir) + L"vimouse_scan.log";
+    WIN32_FILE_ATTRIBUTE_DATA fa = {};
+    bool big = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fa) && (fa.nFileSizeHigh || fa.nFileSizeLow > 256 * 1024);
+    HANDLE f = CreateFileW(path.c_str(), big ? GENERIC_WRITE : FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
+                           big ? CREATE_ALWAYS : OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    SYSTEMTIME st; GetLocalTime(&st);
+    char ts[32];
+    sprintf_s(ts, "%02d-%02d %02d:%02d:%02d.%03d ", st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    std::string s = ts + line + "\r\n";
+    DWORD n = 0;
+    WriteFile(f, s.data(), (DWORD)s.size(), &n, NULL);
+    CloseHandle(f);
+}
+
 // 标准可点击控件
 const CONTROLTYPEID kTypes[] = {
     UIA_ButtonControlTypeId, UIA_HyperlinkControlTypeId, UIA_MenuItemControlTypeId, UIA_ListItemControlTypeId,
@@ -132,8 +153,26 @@ IUIAutomationCondition* TypesCond(IUIAutomation* uia, const CONTROLTYPEID* ids, 
     return Combine(uia, false, std::move(v));
 }
 
-// 常驻扫描线程：UIA 对象和查询条件只建一次，所有扫描排队在这条 MTA 线程上跑
+// 通用可点元素并入标准控件：外层已经可点的就不再标内层（如 tab 里的计时徽章），落在标准控件里的也不标
+std::vector<RECT> MergeGeneric(std::vector<RECT> out, const std::vector<RECT>& generic) {
+    const size_t nStd = out.size();
+    for (size_t i = 0; i < generic.size() && out.size() < 3000; i++) {
+        bool inner = false;
+        for (size_t j = 0; j < generic.size() && !inner; j++)
+            if (j != i && Contains(generic[j], generic[i]) && !NearSame(generic[j], generic[i])) inner = true;
+        for (size_t j = 0; j < nStd && !inner; j++)
+            if (Contains(out[j], generic[i])) inner = true;
+        if (!inner) AddUnique(out, generic[i]);
+    }
+    return out;
+}
+
+// 常驻扫描线程：UIA 对象和查询条件只建一次，扫描排队在这条 MTA 线程上跑。
+// 两个实例：标准控件一条、通用可点元素一条 —— 后者在某些网页上一次能匹配上万个节点（实测 25s），
+// 分开后它再慢也挡不住标准控件先显示，也不会堵住下一次扫描的标准控件阶段
 struct Scanner {
+    explicit Scanner(bool g) : genericPhase(g) {}
+    const bool genericPhase;
     std::mutex m;
     std::condition_variable cv;
     std::deque<std::function<void()>> q;
@@ -167,10 +206,16 @@ struct Scanner {
     }
 
     void Init() {
-        if (FAILED(CoCreateInstance(__uuidof(CUIAutomation8), NULL, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia)) &&
-            FAILED(CoCreateInstance(__uuidof(CUIAutomation), NULL, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia))) {
+        auto hx = [](HRESULT hr) { char b[16]; sprintf_s(b, "%08lX", (unsigned long)hr); return std::string(b); };
+        SafeRelease(cache);
+        SafeRelease(cond);
+        SafeRelease(uia);
+        initErr.clear();
+        HRESULT hr = CoCreateInstance(__uuidof(CUIAutomation8), NULL, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
+        if (FAILED(hr) || !uia) hr = CoCreateInstance(__uuidof(CUIAutomation), NULL, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
+        if (FAILED(hr) || !uia) {
             uia = nullptr;
-            initErr = "CoCreateInstance(CUIAutomation) failed";
+            initErr = "CoCreateInstance(CUIAutomation) failed hr=" + hx(hr);
             return;
         }
         IUIAutomation2* u2 = nullptr;
@@ -179,29 +224,33 @@ struct Scanner {
             u2->put_TransactionTimeout(1000);
             u2->Release();
         }
-        // (标准控件 OR (通用类型 AND 支持 Invoke)) AND 不在屏幕外 AND 已启用
-        IUIAutomationCondition* typed = TypesCond(uia, kTypes, _countof(kTypes));
-        IUIAutomationCondition* generic = Combine(uia, true, {
-            TypesCond(uia, kGenericTypes, _countof(kGenericTypes)),
-            BoolCond(uia, UIA_IsInvokePatternAvailablePropertyId, true) });
-        IUIAutomationCondition* any = Combine(uia, false, { typed, generic });
-        cond = Combine(uia, true, {
-            any,
-            BoolCond(uia, UIA_IsOffscreenPropertyId, false),
-            BoolCond(uia, UIA_IsEnabledPropertyId, true) });
+        if (genericPhase)   // 通用类型（Group/Text/Image/Custom）且支持 Invoke：网页里的自定义可点 div
+            cond = Combine(uia, true, {
+                TypesCond(uia, kGenericTypes, _countof(kGenericTypes)),
+                BoolCond(uia, UIA_IsInvokePatternAvailablePropertyId, true),
+                BoolCond(uia, UIA_IsOffscreenPropertyId, false),
+                BoolCond(uia, UIA_IsEnabledPropertyId, true) });
+        else                // 标准可点控件
+            cond = Combine(uia, true, {
+                TypesCond(uia, kTypes, _countof(kTypes)),
+                BoolCond(uia, UIA_IsOffscreenPropertyId, false),
+                BoolCond(uia, UIA_IsEnabledPropertyId, true) });
         if (!cond) initErr = "CreateCondition failed";
-        if (SUCCEEDED(uia->CreateCacheRequest(&cache))) {
+        hr = uia->CreateCacheRequest(&cache);
+        if (SUCCEEDED(hr) && cache) {
             cache->AddProperty(UIA_BoundingRectanglePropertyId);
             cache->AddProperty(UIA_ControlTypePropertyId);
         } else {
             cache = nullptr;
-            initErr = "CreateCacheRequest failed";
+            initErr += " CreateCacheRequest failed hr=" + hx(hr);
         }
     }
 
+    // 标准实例：去重后的标准控件；通用实例：尺寸过滤后的原始通用元素（之后用 MergeGeneric 并入）
     std::vector<RECT> Scan(const RECT& area, std::string* report) {
         auto t0 = clk::now();
         std::vector<RECT> out;
+        if (!uia || !cond || !cache) Init();   // 初始化失败过：每次扫描前重试
         if (!uia || !cond || !cache) {
             if (report) *report = "ERR " + initErr;
             return out;
@@ -223,10 +272,14 @@ struct Scanner {
             IUIAutomationElement* root = nullptr;
             IUIAutomationElementArray* found = nullptr;
             int added = 0, total = 0;
-            if (SUCCEEDED(uia->ElementFromHandle(w.hwnd, &root)) && root &&
-                SUCCEEDED(root->FindAllBuildCache(TreeScope_Descendants, cond, cache, &found)) && found) {
+            HRESULT hrRoot = uia->ElementFromHandle(w.hwnd, &root);
+            auto tr = clk::now();
+            HRESULT hrFind = E_FAIL;
+            if (SUCCEEDED(hrRoot) && root) hrFind = root->FindAllBuildCache(TreeScope_Descendants, cond, cache, &found);
+            auto tf = clk::now();
+            if (SUCCEEDED(hrFind) && found) {
                 found->get_Length(&total);
-                std::vector<RECT> generic;
+                std::vector<std::pair<CONTROLTYPEID, int>> hist;   // 匹配数异常多时记录类型分布
                 for (int i = 0; i < total && out.size() < 3000; i++) {
                     IUIAutomationElement* e = nullptr;
                     if (FAILED(found->GetElement(i, &e)) || !e) continue;
@@ -235,6 +288,10 @@ struct Scanner {
                     bool ok = SUCCEEDED(e->get_CachedBoundingRectangle(&r));
                     e->get_CachedControlType(&ct);
                     e->Release();
+                    if (total > 500) {
+                        auto it = std::find_if(hist.begin(), hist.end(), [ct](const std::pair<CONTROLTYPEID, int>& p) { return p.first == ct; });
+                        if (it == hist.end()) hist.push_back({ ct, 1 }); else it->second++;
+                    }
                     if (!ok) continue;
                     int rw = r.right - r.left, rh = r.bottom - r.top;
                     if (rw < 3 || rh < 3) continue;
@@ -244,55 +301,72 @@ struct Scanner {
                     bool occluded = false;
                     for (size_t j = 0; j < wi && !occluded; j++) if (wins[j].occluder && Inside(c, wins[j].rc)) occluded = true;
                     if (occluded) continue;
-                    if (IsGenericType(ct)) {
-                        if (rw <= kGenericMaxW && rh <= kGenericMaxH) generic.push_back(r);
+                    if (genericPhase) {
+                        if (rw <= kGenericMaxW && rh <= kGenericMaxH) { out.push_back(r); added++; }
                         continue;
                     }
                     if (AddUnique(out, r)) added++;
                 }
-                // 通用可点元素：外层已经可点的就不再标内层（如 tab 里的计时徽章），落在标准控件里的也不标
-                for (size_t i = 0; i < generic.size() && out.size() < 3000; i++) {
-                    bool inner = false;
-                    for (size_t j = 0; j < generic.size() && !inner; j++)
-                        if (j != i && Contains(generic[j], generic[i]) && !NearSame(generic[j], generic[i])) inner = true;
-                    for (size_t j = 0; j < out.size() && !inner; j++)
-                        if (Contains(out[j], generic[i])) inner = true;
-                    if (!inner && AddUnique(out, generic[i])) added++;
+                if (!hist.empty()) {
+                    std::sort(hist.begin(), hist.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+                    rep += "{";
+                    for (size_t k = 0; k < hist.size() && k < 4; k++)
+                        rep += (k ? "," : "") + std::to_string(hist[k].first) + "x" + std::to_string(hist[k].second);
+                    rep += "}";
                 }
             }
             SafeRelease(found);
             SafeRelease(root);
             scanned++;
-            if (report && (added || total)) {
-                wchar_t cls[64] = {}; GetClassNameW(w.hwnd, cls, 64);
-                long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - tw).count();
-                rep += " " + WideToUtf8(cls) + ":" + std::to_string(added) + "/" + std::to_string(total) + "@" + std::to_string(ms) + "ms";
+            {
+                auto msOf = [](clk::duration d) { return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); };
+                long long ms = msOf(clk::now() - tw);
+                if (added || total || ms >= 100 || FAILED(hrRoot) || FAILED(hrFind)) {
+                    wchar_t cls[64] = {}; GetClassNameW(w.hwnd, cls, 64);
+                    rep += " " + WideToUtf8(cls) + ":" + std::to_string(added) + "/" + std::to_string(total) + "@" + std::to_string(ms) + "ms";
+                    if (ms >= 100) rep += "(root " + std::to_string(msOf(tr - tw)) + " find " + std::to_string(msOf(tf - tr)) + ")";
+                    if (FAILED(hrRoot) || FAILED(hrFind)) {
+                        char hx[16]; sprintf_s(hx, "%08lX", (unsigned long)(FAILED(hrRoot) ? hrRoot : hrFind));
+                        rep += std::string("[hr=") + hx + "]";
+                    }
+                }
             }
         }
-        if (report) {
-            long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
-            *report = "OK n=" + std::to_string(out.size()) + " ms=" + std::to_string(ms) +
-                      " windows=" + std::to_string(scanned) + "/" + std::to_string(wins.size()) + rep;
-        }
+        long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
+        std::string summary = std::string(genericPhase ? "gen" : "std") + " n=" + std::to_string(out.size()) + " ms=" + std::to_string(ms) +
+                              " windows=" + std::to_string(scanned) + "/" + std::to_string(wins.size()) + rep;
+        AppendScanLog(summary);
+        if (report) *report = summary;
         return out;
     }
 };
 
-Scanner& GetScanner() {
-    static Scanner* s = new Scanner;   // 线程常驻到进程退出，故意不析构
-    return *s;
+Scanner& GetScanner(bool generic) {
+    static Scanner* s = new Scanner(false);   // 线程常驻到进程退出，故意不析构
+    static Scanner* g = new Scanner(true);
+    return generic ? *g : *s;
 }
+
+// 只有最新一次扫描值得跑：排队期间又发起了新扫描，旧的直接跳过（尤其是偶尔很慢的通用实例）
+std::atomic<unsigned> g_latestJob{ 0 };
 
 }  // namespace
 
 std::vector<RECT> ScanClickables(const RECT& area, std::string* report) {
-    auto p = std::make_shared<std::promise<std::vector<RECT>>>();
-    auto rep = std::make_shared<std::string>();
-    bool wantReport = report != nullptr;
-    std::future<std::vector<RECT>> f = p->get_future();
-    GetScanner().Post([p, rep, area, wantReport] { p->set_value(GetScanner().Scan(area, wantReport ? rep.get() : nullptr)); });
-    std::vector<RECT> out = f.get();
-    if (report) *report = *rep;
+    auto t0 = clk::now();
+    std::future<std::vector<RECT>> f[2];
+    auto rep = std::make_shared<std::vector<std::string>>(2);
+    for (int i = 0; i < 2; i++) {
+        auto p = std::make_shared<std::promise<std::vector<RECT>>>();
+        f[i] = p->get_future();
+        GetScanner(i == 1).Post([p, rep, area, i] { p->set_value(GetScanner(i == 1).Scan(area, &(*rep)[i])); });
+    }
+    std::vector<RECT> std_ = f[0].get();
+    long long msStd = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
+    std::vector<RECT> out = MergeGeneric(std::move(std_), f[1].get());
+    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
+    if (report) *report = "OK n=" + std::to_string(out.size()) + " ms=" + std::to_string(ms) + " first=" + std::to_string(msStd) +
+                          "ms | " + (*rep)[0] + " | " + (*rep)[1];
     return out;
 }
 
@@ -314,8 +388,10 @@ const COLORREF kSelColor = RGB(0, 255, 160);
 struct WinSig { HWND h; RECT rc; std::wstring title; };
 
 struct Target { RECT rc; std::string label; };
-struct ScanResult { unsigned gen; RECT area; std::vector<WinSig> sig; std::vector<RECT> rects; };
+struct ScanResult { unsigned gen; bool generic; RECT area; std::vector<WinSig> sig; std::vector<RECT> rects; };
 struct ScanCache { bool valid = false; unsigned gen = 0; RECT area = {}; std::vector<WinSig> sig; std::vector<RECT> rects; };
+// 当前这次扫描的两半结果（标准控件 / 通用可点元素各自一条线程，先到先用）
+struct PendingScan { unsigned gen = 0; bool haveStd = false, haveGen = false; std::vector<RECT> std_, gen_; };
 
 HWND   g_wnd = NULL;
 HFONT  g_font = NULL, g_msgFont = NULL;
@@ -328,6 +404,7 @@ unsigned g_gen = 0;
 RECT   g_area = {};
 std::wstring g_msg;
 ScanCache g_cache;
+PendingScan g_pend;
 
 POINT Center(const RECT& r) { return { (r.left + r.right) / 2, (r.top + r.bottom) / 2 }; }
 
@@ -397,24 +474,19 @@ bool SameTargets(const std::vector<Target>& a, const std::vector<Target>& b) {
 
 void LaunchScan(std::vector<WinSig> sig) {
     unsigned gen = ++g_gen;
+    g_latestJob = gen;
+    g_pend = PendingScan{};
+    g_pend.gen = gen;
     RECT area = g_area;
     HWND hwnd = g_wnd;
     auto sp = std::make_shared<std::vector<WinSig>>(std::move(sig));
-    GetScanner().Post([gen, area, hwnd, sp] {
-        auto* r = new ScanResult{ gen, area, std::move(*sp), GetScanner().Scan(area, nullptr) };
-        if (!PostMessageW(hwnd, WM_SCAN_DONE, 0, (LPARAM)r)) delete r;
-    });
-}
-
-// 清空并重新扫描（屏上显示"正在扫描"）
-void StartScan() {
-    g_scanning = true;
-    g_targets.clear();
-    g_sel = -1;
-    g_prefix.clear();
-    g_msg = IsSystemChinese() ? L"正在扫描可点击元素…" : L"Scanning clickable elements…";
-    LaunchScan(Signature(g_area));
-    Redraw();
+    for (bool generic : { false, true }) {
+        GetScanner(generic).Post([gen, generic, area, hwnd, sp] {
+            if (g_latestJob != gen) return;   // 已经有更新的扫描排在后面
+            auto* r = new ScanResult{ gen, generic, area, *sp, GetScanner(generic).Scan(area, nullptr) };
+            if (!PostMessageW(hwnd, WM_SCAN_DONE, 0, (LPARAM)r)) delete r;
+        });
+    }
 }
 
 void SelectTarget(int i) {
@@ -551,16 +623,23 @@ void Paint(HWND hwnd) {
 }
 
 void OnScanDone(HWND hwnd, ScanResult* r) {
-    // 不管模式还在不在，较新的结果都写进缓存（用户可能已用缓存目标点完退出了）
-    if (!g_cache.valid || (int)(r->gen - g_cache.gen) > 0) {
+    if (r->gen != g_pend.gen) return;   // 过时的半份结果
+    if (r->generic) { g_pend.haveGen = true; g_pend.gen_ = std::move(r->rects); }
+    else            { g_pend.haveStd = true; g_pend.std_ = std::move(r->rects); }
+    if (!g_pend.haveStd) return;        // 标准控件还没到：先不显示
+    const bool complete = g_pend.haveGen;
+    std::vector<RECT> rects = complete ? MergeGeneric(g_pend.std_, g_pend.gen_) : g_pend.std_;
+    // 两半都到齐后写缓存；不管模式还在不在（用户可能已用缓存目标点完退出了）
+    if (complete && (!g_cache.valid || (int)(r->gen - g_cache.gen) > 0)) {
         g_cache.valid = true;
         g_cache.gen = r->gen;
         g_cache.area = r->area;
         g_cache.sig = r->sig;
-        g_cache.rects = r->rects;
+        g_cache.rects = rects;
     }
     if (r->gen != g_gen || !g_clickMode) return;
-    std::vector<Target> fresh = BuildTargets(std::move(r->rects));
+    if (rects.empty() && !complete) return;   // 标准控件没找到，等通用元素再说
+    std::vector<Target> fresh = BuildTargets(std::move(rects));
     if (g_scanning) {
         g_scanning = false;
         g_targets = std::move(fresh);
@@ -569,7 +648,7 @@ void OnScanDone(HWND hwnd, ScanResult* r) {
     } else {
         return;                         // 结果没变，或用户已经在选了：不打扰
     }
-    if (g_targets.empty()) {
+    if (g_targets.empty() && complete) {
         g_msg = IsSystemChinese() ? L"这个屏幕上没找到可点击元素" : L"No clickable elements found";
         SetTimer(hwnd, kExitTimer, 1200, NULL);
     } else {
@@ -616,7 +695,8 @@ void CreateClickWindow() {
     g_wnd = CreateOverlayWindow(L"VimouseClickables", ClickWndProc,
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, 0, 0, 0, 0, 255);
     if (g_wnd) SetLayeredWindowAttributes(g_wnd, kKey, 235, LWA_COLORKEY | LWA_ALPHA);
-    GetScanner().Post([] {});   // 提前起扫描线程、建好 UIA 对象，第一次进模式也省掉这段
+    GetScanner(false).Post([] {});   // 提前起扫描线程、建好 UIA 对象，第一次进模式也省掉这段
+    GetScanner(true).Post([] {});
 }
 
 void DestroyClickWindow() {
@@ -625,7 +705,7 @@ void DestroyClickWindow() {
 
 void EnterClickMode() {
     if (!g_wnd) return;
-    if (g_clickMode) { StartScan(); return; }   // 再按一次 = 重新扫描
+    if (g_clickMode) { ExitClickMode(); return; }   // 再按一次 = 关闭（开关）
     g_clickMode = true;
     BuildAlphabet();
     RefreshScreens();
@@ -673,7 +753,7 @@ bool HandleClickKeyDown(DWORD vk, Modifiers m) {
         return true;
     }
     if (IsModVk(vk)) return false;
-    if (IsAction(Action::ClickMode, (WORD)vk, m)) { StartScan(); return true; }
+    if (IsAction(Action::ClickMode, (WORD)vk, m)) { ExitClickMode(); return true; }   // d 是开关：再按一次关闭
     if (IsAction(Action::ClickLeft, (WORD)vk, m))  { DoClick(Button::Left); return true; }
     if (IsAction(Action::ClickRight, (WORD)vk, m)) { DoClick(Button::Right); return true; }
     if (g_scanning) return true;
