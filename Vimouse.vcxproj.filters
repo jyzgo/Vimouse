@@ -28,6 +28,7 @@
     <ClCompile Include="src\Input.cpp"><Filter>Input</Filter></ClCompile>
     <ClCompile Include="src\Mover.cpp"><Filter>Input</Filter></ClCompile>
     <ClCompile Include="src\History.cpp"><Filter>Input</Filter></ClCompile>
+    <ClCompile Include="src\PointPeek.cpp"><Filter>Input</Filter></ClCompile>
     <ClCompile Include="src\Cursor.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\Overlay.cpp"><Filter>UI</Filter></ClCompile>
     <ClCompile Include="src\Indicator.cpp"><Filter>UI</Filter></ClCompile>
@@ -53,6 +54,7 @@
     <ClInclude Include="src\Input.h"><Filter>Input</Filter></ClInclude>
     <ClInclude Include="src\Mover.h"><Filter>Input</Filter></ClInclude>
     <ClInclude Include="src\History.h"><Filter>Input</Filter></ClInclude>
+    <ClInclude Include="src\PointPeek.h"><Filter>Input</Filter></ClInclude>
     <ClInclude Include="src\Cursor.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\Overlay.h"><Filter>UI</Filter></ClInclude>
     <ClInclude Include="src\Indicator.h"><Filter>UI</Filter></ClInclude>

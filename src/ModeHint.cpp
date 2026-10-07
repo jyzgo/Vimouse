@@ -123,6 +123,7 @@ bool Build(Content& c) {
         add(K(Action::ScreenCenter), Z(L"屏幕中心/切屏", L"Center/next screen"));
         add(K(Action::TagPut) + L"/" + K(Action::TagJump), Z(L"放/跳标签", L"Put/jump tag"));
         add(K(Action::HistPrev) + L"/" + K(Action::HistNext), Z(L"上/下一个位置", L"Prev/next pos"));
+        add(K(Action::JumpInputPointKey) + L"/" + K(Action::JumpInputPointNext), Z(L"输入点 倒退/前进(按住看)", L"Input pts back/fwd (hold)"));
         add(L"Enter", Z(L"点击并退出", L"Click & exit"));
         add(L"Esc", Z(L"退出", L"Exit"));
     }

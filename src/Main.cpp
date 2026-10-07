@@ -13,6 +13,7 @@
 #include "KeyOsd.h"
 #include "HelpOverlay.h"
 #include "ModeHint.h"
+#include "PointPeek.h"
 #include "SettingsDialog.h"
 #include "Hook.h"
 #include "PipeServer.h"
@@ -90,6 +91,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         CreateHelpWindow();
         KeyOsd_Create();
         ModeHint_Create();
+        PointPeek_Create();
         LoadTags();
         LoadRemoteHosts();
         StartPipeServer();
@@ -147,6 +149,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (g_hintWindow)      DestroyWindow(g_hintWindow);
         if (g_indicatorWindow) DestroyWindow(g_indicatorWindow);
         if (g_helpWindow)      DestroyWindow(g_helpWindow);
+        PointPeek_Destroy();
         ModeHint_Destroy();
         DestroyAllTags();
         PostQuitMessage(0);

@@ -111,7 +111,7 @@ LRESULT CALLBACK CaptureBtnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         // 非 Toggle 类动作不允许带 Ctrl/Alt（会和系统快捷键冲突）
         Action a = (Action)g_captureRow;
         bool isToggle = (a == Action::Toggle || a == Action::ToggleCenter || a == Action::ToggleRemote || a == Action::ToggleArrow ||
-                         a == Action::HideModeHint);
+                         a == Action::HideModeHint || a == Action::JumpInputPoint);
         if (!isToggle && (c.ctrl || c.alt)) {
             MessageBoxW(g_dlg, T(L"普通动作请使用不带 Ctrl/Alt 的按键。", L"Use a key without Ctrl/Alt for regular actions."), L"Vimouse", MB_OK | MB_ICONWARNING);
             return 0;

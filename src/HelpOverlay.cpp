@@ -54,6 +54,7 @@ static std::vector<std::wstring> Lines(bool zh) {
     L.push_back(L" " + K(Action::TagPut) + (zh ? L"  放置标签" : L"  Place tag"));
     L.push_back(L" " + K(Action::ScreenCenter) + (zh ? L"  屏幕中心/切屏" : L"  Screen center/switch"));
     L.push_back(L" " + R(Action::HistPrev, Action::HistNext) + (zh ? L"  历史位置" : L"  Prev/Next position"));
+    L.push_back(L" " + K(Action::JumpInputPointKey) + L"/" + K(Action::JumpInputPointNext) + (zh ? L"  输入点 倒退/前进(按住看)" : L"  Input pts back/fwd (hold)"));
     L.push_back(zh ? L" Enter  点击+退出" : L" Enter  Click + exit");
     L.push_back(zh ? L" Esc    退出模式" : L" Esc    Exit mode");
     return L;

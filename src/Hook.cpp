@@ -7,6 +7,7 @@
 #include "Mover.h"
 #include "Input.h"
 #include "History.h"
+#include "PointPeek.h"
 #include "Tags.h"
 #include "Hint.h"
 #include "Grid.h"
@@ -120,7 +121,7 @@ bool HandleWheelKeyDown(DWORD vk, Modifiers m) {
     }
     if (IsAction(Action::WheelMode, (WORD)vk, m)) { g_wheelMode = false; UpdateIndicatorPosition(); return true; }
     if (IsAction(Action::Hint, (WORD)vk, m)) { g_wheelMode = false; EnterHintMode(); return true; }
-    if (IsAction(Action::ClickLeft, (WORD)vk, m)) { Click(Button::Left); TriggerClickFlash(true); return true; }
+    if (IsAction(Action::ClickLeft, (WORD)vk, m)) { Click(Button::Left); TriggerClickFlash(true); AddMousePositionToStack(); return true; }
     if (IsAction(Action::ClickRight, (WORD)vk, m)) { Click(Button::Right); TriggerClickFlash(true); return true; }
     if (IsAction(Action::DragToggle, (WORD)vk, m)) { ToggleDrag(); return true; }
     if (vk == VK_ESCAPE) { g_wheelMode = false; UpdateIndicatorPosition(); return true; }
@@ -139,6 +140,19 @@ bool HandleTagJumpKeyDown(DWORD vk, Modifiers m) {
         return true;
     }
     return false;
+}
+
+// ---- 长按 a/s 预览输入点：按下显示编号圆圈，松开跳到 0 号；按住时按数字 0-4 直接跳到对应点 ----
+static WORD s_peekVk = 0;
+static bool s_peekOlder = true;
+static bool s_peekUsed = false;
+
+static void StartPeek(WORD vk, bool older) {
+    if (s_peekVk) return;                      // 长按的自动重复
+    s_peekVk = vk; s_peekOlder = older; s_peekUsed = false;
+    POINT pts[PEEK_MAX];
+    int n = PeekInputPoints(older, pts, PEEK_MAX);
+    PointPeek_Show(pts, n);
 }
 
 bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
@@ -199,6 +213,20 @@ bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
     if (IsAction(Action::TagPeek, (WORD)vk, m)) { EnterTagMode(); return true; }
     if (IsAction(Action::HistPrev, (WORD)vk, m)) { GoToPreviousPosition(); g_lastActionWasC = false; UpdateIndicatorPosition(); return true; }
     if (IsAction(Action::HistNext, (WORD)vk, m)) { GoToNextPosition(); g_lastActionWasC = false; UpdateIndicatorPosition(); return true; }
+    if (s_peekVk && vk >= '0' && vk < '0' + PEEK_MAX) {
+        PointPeek_Hide();
+        JumpToInputPoint(s_peekOlder, (int)(vk - '0') + 1);
+        s_peekUsed = true;
+        g_lastActionWasC = false; UpdateIndicatorPosition(); return true;
+    }
+    if (IsAction(Action::JumpInputPointKey, (WORD)vk, m)) {    // a = 倒退（更早）
+        if (!g_remoteMode) StartPeek((WORD)vk, true);
+        g_lastActionWasC = false; return true;
+    }
+    if (IsAction(Action::JumpInputPointNext, (WORD)vk, m)) {   // s = 前进（更近）
+        if (!g_remoteMode) StartPeek((WORD)vk, false);
+        g_lastActionWasC = false; return true;
+    }
 
     // 功能键 / 方向键 / 修饰键 / 数字：放行
     if (IsModifierVk(vk) || (vk >= VK_F1 && vk <= VK_F24) || (vk >= VK_LEFT && vk <= VK_DOWN) ||
@@ -213,6 +241,12 @@ bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
 }
 
 bool HandleKeyUp(DWORD vk) {
+    if (s_peekVk && (WORD)vk == s_peekVk) {
+        PointPeek_Hide();
+        s_peekVk = 0;
+        if (!s_peekUsed && g_isActive) { JumpToInputPoint(s_peekOlder); UpdateIndicatorPosition(); }
+        return true;
+    }
     if (unsigned bits = MoveBitOfVk((WORD)vk)) {
         g_moveKeys &= ~bits;
         if (g_moveKeys == 0) StopSmoothMove();
@@ -254,10 +288,14 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         return CallNextHookEx(g_keyboardHook, nCode, wParam, lParam);
 
     bool swallow = false;
-    if ((g_isActive || g_arrowMode) && !g_modeHintSessionOff && g_settings.modeHint &&
+    if (!g_remoteMode && IsAction(Action::JumpInputPoint, (WORD)vk, m)) {
+        // 全局可用（激活与否都行）：跟 a 一样逐个往前翻输入点，带 Shift 往回
+        if (isDown) { JumpToInputPoint(!m.shift); UpdateIndicatorPosition(); }
+        swallow = true;
+    } else if ((g_isActive || g_arrowMode) && g_settings.modeHint &&
         IsAction(Action::HideModeHint, (WORD)vk, m)) {
-        // 只在提示框正显示时吞掉；本次运行不再显示，托盘右键菜单可恢复
-        if (isDown) g_modeHintSessionOff = true;
+        // 开关：按一下隐藏，再按一下显示（只在激活/方向键模式下吞掉，其余时候放行给其它程序）
+        if (isDown) g_modeHintSessionOff = !g_modeHintSessionOff;
         swallow = true;
     } else if (isDown && IsAction(Action::ToggleArrow, (WORD)vk, m)) {
         SetArrowMode(!g_arrowMode);
@@ -282,6 +320,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 ExitAllModes();
                 HideAllTagWindows();
                 SetActive(false);
+                AddMousePositionToStack();
                 Click(Button::Left);
                 swallow = true;
             }

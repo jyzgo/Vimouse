@@ -86,6 +86,7 @@
     <ClInclude Include="src\Hint.h" />
     <ClInclude Include="src\ModeHint.h" />
     <ClInclude Include="src\History.h" />
+    <ClInclude Include="src\PointPeek.h" />
     <ClInclude Include="src\Hook.h" />
     <ClInclude Include="src\Indicator.h" />
     <ClInclude Include="src\Input.h" />
@@ -111,6 +112,7 @@
     <ClCompile Include="src\Hint.cpp" />
     <ClCompile Include="src\ModeHint.cpp" />
     <ClCompile Include="src\History.cpp" />
+    <ClCompile Include="src\PointPeek.cpp" />
     <ClCompile Include="src\Hook.cpp" />
     <ClCompile Include="src\Indicator.cpp" />
     <ClCompile Include="src\Input.cpp" />
