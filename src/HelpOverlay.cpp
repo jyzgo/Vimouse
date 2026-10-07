@@ -49,6 +49,7 @@ static std::vector<std::wstring> Lines(bool zh) {
     L.push_back(L" " + K(Action::DragToggle) + (zh ? L"  拖拽开关" : L"  Drag toggle"));
     L.push_back(L" " + K(Action::Hint) + (zh ? L"  Hint跳转(2字母)" : L"  Hint jump (2-letter)"));
     L.push_back(L" " + K(Action::Grid) + (zh ? L"  Grid二分定位" : L"  Grid bisect"));
+    L.push_back(L" " + K(Action::ClickMode) + (zh ? L"  可点击元素(hjkl跳)" : L"  Clickables (hjkl)"));
     L.push_back(L" " + K(Action::WheelMode) + (zh ? L"  滚轮模式" : L"  Scroll mode"));
     L.push_back(L" " + K(Action::TagJump) + (zh ? L"  标签跳转" : L"  Tag jump"));
     L.push_back(L" " + K(Action::TagPut) + (zh ? L"  放置标签" : L"  Place tag"));

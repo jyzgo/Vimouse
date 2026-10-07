@@ -1,5 +1,7 @@
 #include "CommandHandler.h"
 #include "Common.h"
+#include "Clickables.h"
+#include "Screens.h"
 #include <sstream>
 #include <vector>
 #include <thread>
@@ -255,6 +257,14 @@ std::string HandleCommand(const std::string& command) {
             return "ERR unknown direction: " + parts[1];
         }
         return "OK";
+    }
+
+    // clickables - 扫描光标所在屏幕的可点击元素（只统计，不动鼠标）
+    if (cmd == "clickables") {
+        RefreshScreens();
+        std::string rep;
+        ScanClickables(ScreenRectAt(GetCurrentScreenIndex()), &rep);
+        return rep;
     }
 
     // pos

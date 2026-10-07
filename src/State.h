@@ -46,6 +46,7 @@ extern bool  g_miniGridMode;        // hint 之后的单层微调 grid
 extern bool  g_wheelMode;
 extern bool  g_tagMode;
 extern bool  g_arrowMode;           // 方向键模式：移动键 h/j/k/l → 发送 ←↓↑→（与鼠标模式互斥）
+extern bool  g_clickMode;           // 可点击元素模式（UIA 扫描按钮/链接/图标）
 
 // ---- 修饰键（移动线程读取 shift）----
 extern std::atomic<bool> g_shiftPressed;

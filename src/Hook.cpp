@@ -11,6 +11,7 @@
 #include "Tags.h"
 #include "Hint.h"
 #include "Grid.h"
+#include "Clickables.h"
 #include "Indicator.h"
 #include "KeyOsd.h"
 #include "Screens.h"
@@ -63,6 +64,7 @@ Modifiers CurrentMods() { return { Down(VK_CONTROL), Down(VK_MENU), Down(VK_SHIF
 void ExitAllModes() {
     ExitHintMode(false);
     ExitGridMode();
+    ExitClickMode();
     g_wheelMode = false;
     ExitTagMode();
 }
@@ -83,7 +85,10 @@ void SetRemoteKeyLabel(DWORD vk) {
 
 bool HandleGridKeyDown(DWORD vk, Modifiers m) {
     if (vk == VK_ESCAPE) { ExitGridMode(); return true; }
-    if (unsigned bit = MoveBitOf((WORD)vk, m)) {
+    // 方向键 ←↑→↓ 与移动键（h/j/k/l 等）等价：选对应半区
+    unsigned arrowBit = (vk == VK_LEFT) ? MV_LEFT : (vk == VK_RIGHT) ? MV_RIGHT :
+                        (vk == VK_UP) ? MV_UP : (vk == VK_DOWN) ? MV_DOWN : 0;
+    if (unsigned bit = arrowBit ? arrowBit : MoveBitOf((WORD)vk, m)) {
         GridSelect(bit);
         if (g_miniGridMode) ExitGridMode();
         return true;
@@ -199,6 +204,7 @@ bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
     if (IsAction(Action::WheelMode, (WORD)vk, m)) { g_wheelMode = true; g_lastActionWasC = false; return true; }
     if (IsAction(Action::Grid, (WORD)vk, m)) { EnterGridModeAtCursor(); g_lastActionWasC = false; return true; }
     if (IsAction(Action::Hint, (WORD)vk, m)) { EnterHintMode(); g_lastActionWasC = false; return true; }
+    if (IsAction(Action::ClickMode, (WORD)vk, m)) { EnterClickMode(); g_lastActionWasC = false; return true; }
     if (IsAction(Action::ScreenCenter, (WORD)vk, m)) {
         if (g_lastActionWasC) g_currentScreenIndex = (g_currentScreenIndex + 1) % (int)g_screenRects.size();   // 连按：切屏
         else g_currentScreenIndex = GetCurrentScreenIndex();
@@ -327,6 +333,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         }
         else if (g_gridMode)      swallow = HandleGridKeyDown(vk, m);
         else if (g_hintMode)      swallow = HandleHintKeyDown(vk, m);
+        else if (g_clickMode)     swallow = HandleClickKeyDown(vk, m);
         else if (g_tagMode && HandleTagJumpKeyDown(vk, m)) swallow = true;
         else if (vk == VK_ESCAPE) {
             if (g_wheelMode) { g_wheelMode = false; UpdateIndicatorPosition(); }

@@ -3,6 +3,7 @@
 #include "Config.h"
 #include "Keymap.h"
 #include "Overlay.h"
+#include "Clickables.h"
 #include "Util.h"
 #include <windows.h>
 #include <algorithm>
@@ -79,6 +80,7 @@ bool Build(Content& c) {
         c.title = g_miniGridMode ? Z(L"微调 Grid（选一次）", L"Fine grid (one pick)") : Z(L"Grid 定位", L"Grid");
         c.accent = RGB(80, 200, 255);
         add(mv, Z(L"选半区", L"Pick half"));
+        add(L"\u2190\u2191\u2192\u2193", Z(L"方向键也可选半区", L"Arrows pick half too"));
         add(dg, Z(L"选象限", L"Pick quarter"));
         add(K(Action::GridBack), Z(L"返回上级", L"Back"));
         add(K(Action::Grid), Z(L"从屏幕中心重来", L"Restart at center"));
@@ -92,6 +94,19 @@ bool Build(Content& c) {
         c.accent = RGB(255, 210, 80);
         add(L"A-Z", Z(L"输入两个字母", L"Type 2 letters"));
         add(L"Esc", Z(L"取消", L"Cancel"));
+    } else if (g_clickMode) {
+        int n = ClickModeStatus();
+        c.title = Z(L"可点击元素", L"Clickables");
+        if (n < 0) c.title += Z(L" · 扫描中", L" · scanning");
+        else c.title += L" · " + std::to_wstring(n);
+        c.accent = RGB(255, 200, 40);
+        add(mv + L" / \u2190\u2193\u2191\u2192", Z(L"跳到该方向最近的", L"Jump nearest that way"));
+        add(Z(L"标签字母", L"Label"), Z(L"直接跳到该元素", L"Jump to element"));
+        add(K(Action::ClickLeft) + L"/Enter", Z(L"左键点击", L"Left click"));
+        add(K(Action::ClickRight), Z(L"右键", L"Right click"));
+        add(K(Action::ClickMode), Z(L"重新扫描", L"Rescan"));
+        add(L"Backspace", Z(L"清除已输字母", L"Clear typed"));
+        add(L"Esc", Z(L"退出", L"Exit"));
     } else if (g_tagMode) {
         c.title = Z(L"标签跳转", L"Tag jump");
         c.accent = RGB(255, 160, 80);
@@ -119,6 +134,7 @@ bool Build(Content& c) {
         add(K(Action::DragToggle), Z(L"拖拽开关", L"Drag toggle"));
         add(K(Action::Hint), Z(L"Hint 跳转", L"Hint jump"));
         add(K(Action::Grid), Z(L"Grid 定位", L"Grid"));
+        add(K(Action::ClickMode), Z(L"可点击元素", L"Clickables"));
         add(K(Action::WheelMode), Z(L"滚轮模式", L"Scroll mode"));
         add(K(Action::ScreenCenter), Z(L"屏幕中心/切屏", L"Center/next screen"));
         add(K(Action::TagPut) + L"/" + K(Action::TagJump), Z(L"放/跳标签", L"Put/jump tag"));

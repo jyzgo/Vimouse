@@ -90,7 +90,7 @@ void RefreshIndicator() {
 
 void UpdateIndicatorPosition() {
     if (!g_indicatorWindow) return;
-    bool show = (g_isActive && !g_hintMode && !g_gridMode) || g_arrowMode;
+    bool show = (g_isActive && !g_hintMode && !g_gridMode && !g_clickMode) || g_arrowMode;
     if (!show) { ShowWindow(g_indicatorWindow, SW_HIDE); return; }
 
     POINT p; GetCursorPos(&p);

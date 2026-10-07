@@ -11,6 +11,7 @@ bool  g_miniGridMode = false;
 bool  g_wheelMode = false;
 bool  g_tagMode = false;
 bool  g_arrowMode = false;
+bool  g_clickMode = false;
 bool  g_modeHintSessionOff = false;
 
 std::atomic<bool> g_shiftPressed{ false };

@@ -8,6 +8,10 @@
 static HPEN  g_crossPen = NULL, g_diagPen = NULL;
 static HFONT g_labelFont = NULL;
 static int   g_labelSize = 0;
+static int   g_gridPad = 0;   // 小区域时窗口向外扩出的边距（标签画在方块外面），0 = 不扩
+
+static const int kMinInnerFont = 22;   // 方块内标签低于该字号时改为外置标签
+static const int kOuterFont = 26;      // 外置标签字号
 
 static void EnsureRes(int fontSize) {
     if (!g_crossPen) g_crossPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
@@ -28,35 +32,51 @@ static LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     switch (msg) {
     case WM_PAINT: {
         DoubleBuffer db(hwnd);
-        int w = db.Width(), h = db.Height();
+        const int pad = g_gridPad;
+        // inner = 实际选择区域（窗口坐标）；有边距时四周留给标签
+        const int x0 = pad, y0 = pad;
+        const int w = max(2, db.Width() - 2 * pad), h = max(2, db.Height() - 2 * pad);
         int midX = w / 2, midY = h / 2;
         if (g_gridCustomCenter && !g_gridStack.empty()) {
             const RECT& sr = g_gridStack.back();
             midX = max(1, min(w - 1, (int)(g_gridCenter.x - sr.left)));
             midY = max(1, min(h - 1, (int)(g_gridCenter.y - sr.top)));
         }
-        int fontSize = max(12, min(28, min(w, h) / 6));
+        int fontSize = pad ? kOuterFont : max(kMinInnerFont, min(40, min(w, h) / 6));
         EnsureRes(fontSize);
 
         FillRect(db.mem, &db.rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
         HGDIOBJ oldPen = SelectObject(db.mem, g_crossPen);
-        MoveToEx(db.mem, midX, 0, NULL); LineTo(db.mem, midX, h);
-        MoveToEx(db.mem, 0, midY, NULL); LineTo(db.mem, w, midY);
+        if (pad) {   // 外置标签时画出选择方块边框
+            HGDIOBJ oldBrush = SelectObject(db.mem, GetStockObject(NULL_BRUSH));
+            Rectangle(db.mem, x0 - 1, y0 - 1, x0 + w + 1, y0 + h + 1);
+            SelectObject(db.mem, oldBrush);
+        }
+        const int cx = x0 + midX, cy = y0 + midY;
+        MoveToEx(db.mem, cx, y0, NULL); LineTo(db.mem, cx, y0 + h);
+        MoveToEx(db.mem, x0, cy, NULL); LineTo(db.mem, x0 + w, cy);
         SelectObject(db.mem, g_diagPen);
-        MoveToEx(db.mem, 0, 0, NULL); LineTo(db.mem, midX, midY);
-        MoveToEx(db.mem, w, 0, NULL); LineTo(db.mem, midX, midY);
-        MoveToEx(db.mem, 0, h, NULL); LineTo(db.mem, midX, midY);
-        MoveToEx(db.mem, w, h, NULL); LineTo(db.mem, midX, midY);
+        MoveToEx(db.mem, x0, y0, NULL);         LineTo(db.mem, cx, cy);
+        MoveToEx(db.mem, x0 + w, y0, NULL);     LineTo(db.mem, cx, cy);
+        MoveToEx(db.mem, x0, y0 + h, NULL);     LineTo(db.mem, cx, cy);
+        MoveToEx(db.mem, x0 + w, y0 + h, NULL); LineTo(db.mem, cx, cy);
         SelectObject(db.mem, oldPen);
 
-        // 方向键标签（读取当前键位），靠近分割中心 75% 处
-        int lx = midX * 3 / 4, rx = midX + (w - midX) / 4;
-        int ty = midY * 3 / 4, by = midY + (h - midY) / 4;
+        // 方向键标签（读取当前键位）：大区域画在方块内靠近分割中心 75% 处；
+        // 小区域（如 Hint 之后的微调方块）画在方块外一圈，字才能放大
+        int lx, rx, ty, by;
+        if (pad) {
+            lx = pad / 2; rx = x0 + w + pad / 2;
+            ty = pad / 2; by = y0 + h + pad / 2;
+        } else {
+            lx = x0 + midX * 3 / 4; rx = cx + (w - midX) / 4;
+            ty = y0 + midY * 3 / 4; by = cy + (h - midY) / 4;
+        }
         struct { Action a; int x, y; COLORREF c; } labels[] = {
-            { Action::MoveLeft,      lx,   midY, RGB(50, 255, 120) },
-            { Action::MoveRight,     rx,   midY, RGB(50, 255, 120) },
-            { Action::MoveUp,        midX, ty,   RGB(80, 200, 255) },
-            { Action::MoveDown,      midX, by,   RGB(80, 200, 255) },
+            { Action::MoveLeft,      lx,   cy,   RGB(50, 255, 120) },
+            { Action::MoveRight,     rx,   cy,   RGB(50, 255, 120) },
+            { Action::MoveUp,        cx,   ty,   RGB(80, 200, 255) },
+            { Action::MoveDown,      cx,   by,   RGB(80, 200, 255) },
             { Action::MoveUpLeft,    lx,   ty,   RGB(200, 200, 100) },
             { Action::MoveUpRight,   rx,   ty,   RGB(200, 200, 100) },
             { Action::MoveDownLeft,  lx,   by,   RGB(200, 200, 100) },
@@ -93,7 +113,10 @@ void CreateGridWindow() {
 
 static void ShowRegion(const RECT& r) {
     if (!g_gridWindow) return;
-    MoveWindow(g_gridWindow, r.left, r.top, RectW(r), RectH(r), TRUE);
+    // 区域太小、方块内放不下大字时，窗口向外扩一圈，把标签画在方块外面
+    g_gridPad = (min(RectW(r), RectH(r)) / 6 < kMinInnerFont) ? kOuterFont * 3 / 2 + 4 : 0;
+    const int p = g_gridPad;
+    MoveWindow(g_gridWindow, r.left - p, r.top - p, RectW(r) + 2 * p, RectH(r) + 2 * p, TRUE);
     ShowWindow(g_gridWindow, SW_SHOWNA);
     InvalidateRect(g_gridWindow, NULL, TRUE);
     UpdateWindow(g_gridWindow);

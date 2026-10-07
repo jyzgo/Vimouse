@@ -46,6 +46,7 @@ const ActionMeta kMeta[] = {
     { Action::HistPrev,      "hist_prev",      L"上一个历史位置",      L"Previous position",      K('R') },
     { Action::HistNext,      "hist_next",      L"下一个历史位置",      L"Next position",          K('E') },
     { Action::GridBack,      "grid_back",      L"Grid: 返回上一级",    L"Grid: back",             K('R') },
+    { Action::ClickMode,     "click_mode",     L"可点击元素模式(标出按钮, hjkl 跳)", L"Clickables mode (mark buttons, hjkl jump)", K('D') },
 };
 static_assert(sizeof(kMeta) / sizeof(kMeta[0]) == (size_t)Action::Count, "kMeta must cover every Action");
 

@@ -9,6 +9,7 @@
 #include "Tags.h"
 #include "Hint.h"
 #include "Grid.h"
+#include "Clickables.h"
 #include "Indicator.h"
 #include "KeyOsd.h"
 #include "HelpOverlay.h"
@@ -87,6 +88,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         RefreshScreens();
         CreateGridWindow();
         CreateHintWindow();
+        CreateClickWindow();
         CreateIndicatorWindow();
         CreateHelpWindow();
         KeyOsd_Create();
@@ -147,6 +149,7 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         DestroyCustomCursors();
         if (g_gridWindow)      DestroyWindow(g_gridWindow);
         if (g_hintWindow)      DestroyWindow(g_hintWindow);
+        DestroyClickWindow();
         if (g_indicatorWindow) DestroyWindow(g_indicatorWindow);
         if (g_helpWindow)      DestroyWindow(g_helpWindow);
         PointPeek_Destroy();

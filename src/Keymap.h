@@ -12,6 +12,7 @@ enum class Action {
     TagPut, TagJump, TagPeek,
     HistPrev, HistNext,
     GridBack,
+    ClickMode,
     Count
 };
 
