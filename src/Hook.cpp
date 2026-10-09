@@ -61,6 +61,13 @@ bool Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
 Modifiers CurrentMods() { return { Down(VK_CONTROL), Down(VK_MENU), Down(VK_SHIFT) }; }
 
+// 带 Ctrl/Alt 的组合键是否被 keymap 绑定（IsAction 要求 ctrl/alt 完全一致，所以 Alt+M 不会命中 m=Hint）
+bool IsBoundChord(DWORD vk, Modifiers m) {
+    for (int i = 0; i < (int)Action::Count; i++)
+        if (IsAction((Action)i, (WORD)vk, m)) return true;
+    return false;
+}
+
 void ExitAllModes() {
     ExitHintMode(false);
     ExitGridMode();
@@ -161,13 +168,6 @@ static void StartPeek(WORD vk, bool older) {
 }
 
 bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
-    // Ctrl+字母组合一律放行（复制粘贴等），除非 keymap 明确绑定了 Ctrl 组合
-    if (m.ctrl && vk >= 'A' && vk <= 'Z') {
-        bool bound = false;
-        for (int i = 0; i < (int)Action::Count; i++)
-            if (g_keymap[i].ctrl && IsAction((Action)i, (WORD)vk, m)) { bound = true; break; }
-        if (!bound) return false;
-    }
     if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return false;
 
     SetRemoteKeyLabel(vk);
@@ -319,6 +319,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         else if (IsAction(Action::ToggleCenter, (WORD)vk, m)) { ToggleActive(true); swallow = true; }
         else if (IsAction(Action::Toggle, (WORD)vk, m))       { ToggleActive(false); swallow = true; }
         else if (!g_isActive)                                 { swallow = false; }
+        // Ctrl/Alt 组合键（复制粘贴、pty_share 的 Alt+M/Alt+G 等）一律放行给前台程序，
+        // 除非 keymap 明确绑定了这个组合。各子模式（hint/grid/click）同样适用
+        else if ((m.ctrl || m.alt) && !IsBoundChord(vk, m))   { swallow = false; }
         else if (vk == VK_RETURN) {
             // Enter：点击并退出（Ctrl+Enter 放行）
             if (m.ctrl) swallow = false;

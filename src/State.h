@@ -30,6 +30,7 @@ struct Settings {
     bool keyOsd       = false;  // 屏幕底部按键提示
     bool customCursor = true;   // 激活时使用十字准星光标
     bool modeHint     = true;   // 屏幕右侧显示当前模式可用按键
+    bool inputMove    = false;  // hjkl 移动走 SendInput（Deskflow 等 KVM 主控端能看到，推到屏幕边缘可切屏）
 };
 
 // 主窗口自定义消息
