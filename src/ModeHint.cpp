@@ -100,13 +100,12 @@ bool Build(Content& c) {
         if (n < 0) c.title += Z(L" · 扫描中", L" · scanning");
         else c.title += L" · " + std::to_wstring(n);
         c.accent = RGB(255, 200, 40);
+        add(Z(L"两字母坐标", L"2-letter coord"), Z(L"同 Hint 位置, 直接跳", L"Same as Hint, jump"));
         add(mv + L" / \u2190\u2193\u2191\u2192", Z(L"跳到该方向最近的", L"Jump nearest that way"));
-        add(Z(L"标签字母", L"Label"), Z(L"直接跳到该元素", L"Jump to element"));
         add(K(Action::ClickLeft) + L"/Enter", Z(L"左键点击", L"Left click"));
         add(K(Action::ClickRight), Z(L"右键", L"Right click"));
-        add(K(Action::ClickMode), Z(L"重新扫描", L"Rescan"));
         add(L"Backspace", Z(L"清除已输字母", L"Clear typed"));
-        add(L"Esc", Z(L"退出", L"Exit"));
+        add(K(Action::ClickMode) + L"/Esc", Z(L"退出", L"Exit"));
     } else if (g_tagMode) {
         c.title = Z(L"标签跳转", L"Tag jump");
         c.accent = RGB(255, 160, 80);

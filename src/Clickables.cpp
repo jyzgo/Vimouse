@@ -5,6 +5,7 @@
 #include "Input.h"
 #include "History.h"
 #include "Indicator.h"
+#include "Hint.h"
 #include "Util.h"
 #include <objbase.h>
 #include <uiautomation.h>
@@ -117,6 +118,8 @@ const CONTROLTYPEID kGenericTypes[] = {
     UIA_GroupControlTypeId, UIA_TextControlTypeId, UIA_ImageControlTypeId, UIA_CustomControlTypeId,
 };
 constexpr int kGenericMaxW = 480, kGenericMaxH = 160;   // 超过这个尺寸的通用元素多半是带点击委托的整块面板
+// 例外：又宽又矮的整行（pty_share 的 "… +N lines (点击展开)" 566×23、底部 cx:… HUD 条 530×23）是真按钮
+constexpr int kGenericRowMaxW = 1400, kGenericRowMaxH = 48;
 
 bool IsGenericType(CONTROLTYPEID t) {
     for (CONTROLTYPEID g : kGenericTypes) if (g == t) return true;
@@ -302,7 +305,9 @@ struct Scanner {
                     for (size_t j = 0; j < wi && !occluded; j++) if (wins[j].occluder && Inside(c, wins[j].rc)) occluded = true;
                     if (occluded) continue;
                     if (genericPhase) {
-                        if (rw <= kGenericMaxW && rh <= kGenericMaxH) { out.push_back(r); added++; }
+                        if ((rw <= kGenericMaxW && rh <= kGenericMaxH) || (rw <= kGenericRowMaxW && rh <= kGenericRowMaxH)) {
+                            out.push_back(r); added++;
+                        }
                         continue;
                     }
                     if (AddUnique(out, r)) added++;
@@ -397,8 +402,9 @@ HWND   g_wnd = NULL;
 HFONT  g_font = NULL, g_msgFont = NULL;
 std::vector<Target> g_targets;
 int    g_sel = -1;
+// hjkl 走过的路：{出发的框, 方向}。按反方向时原路退回，保证 h 再 l（或 l 再 h）一定回到原处
+std::vector<std::pair<int, unsigned>> g_moveTrail;
 std::string g_prefix;
-std::string g_alphabet;
 bool   g_scanning = false;   // 扫描中且屏上还没有目标
 unsigned g_gen = 0;
 RECT   g_area = {};
@@ -426,42 +432,79 @@ bool SameSig(const std::vector<WinSig>& a, const std::vector<WinSig>& b) {
     return true;
 }
 
-void Redraw() { if (g_wnd) InvalidateRect(g_wnd, NULL, FALSE); }
+void Render();
+void Redraw() { Render(); }
 
-void BuildAlphabet() {
-    // 标签字母要避开本模式里有用的键（移动、左右键、本模式开关）
-    const char* base = "ASEWRQTCVXZBIOUPMNY";
-    std::vector<WORD> used;
-    for (Action a : { Action::MoveLeft, Action::MoveDown, Action::MoveUp, Action::MoveRight,
-                      Action::ClickLeft, Action::ClickRight, Action::ClickMode })
-        if (!g_keymap[(int)a].ctrl && !g_keymap[(int)a].alt) used.push_back(g_keymap[(int)a].vk);
-    g_alphabet.clear();
-    for (const char* p = base; *p; p++)
-        if (std::find(used.begin(), used.end(), (WORD)*p) == used.end()) g_alphabet += *p;
-    if (g_alphabet.size() < 2) g_alphabet = "ASEWRQTCVXZ";
+// ---- Hint 同款坐标：屏幕 26×26 格，标签 = 列字母 + 行字母 ----
+constexpr int kGrid = 26;
+
+long long Dist2(POINT a, POINT b) { long long dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; }
+
+// 点所在的 Hint 格（越界夹到边上）
+void CellOf(POINT p, int& col, int& row) {
+    int w = max(1, (int)RectW(g_area)), h = max(1, (int)RectH(g_area));
+    col = max(0, min(kGrid - 1, (int)((long long)(p.x - g_area.left) * kGrid / w)));
+    row = max(0, min(kGrid - 1, (int)((long long)(p.y - g_area.top) * kGrid / h)));
 }
 
+std::string CellLabel(int col, int row) { return std::string{ (char)('A' + col), (char)('A' + row) }; }
+
+// 坐标第一个字母（列）不能用本模式的命令键：移动 hjkl、左/右键 f/g、关闭 d —— 否则按 h 分不清是"往左跳"还是"输坐标"。
+// 第二个字母（行）已经在输坐标的状态里，26 个随便用，跟 Hint 完全一致。
+bool g_colBanned[kGrid] = {};
+
+void BuildColumnBans() {
+    for (bool& b : g_colBanned) b = false;
+    for (Action a : { Action::MoveLeft, Action::MoveDown, Action::MoveUp, Action::MoveRight,
+                      Action::ClickLeft, Action::ClickRight, Action::ClickMode }) {
+        const KeyChord& k = g_keymap[(int)a];
+        if (!k.ctrl && !k.alt && k.vk >= 'A' && k.vk <= 'Z') g_colBanned[k.vk - 'A'] = true;
+    }
+}
+
+bool IsCommandLetter(char ch) { return ch >= 'A' && ch <= 'Z' && g_colBanned[ch - 'A']; }
+
+// 每个框标上它中心所在的 Hint 格坐标 —— 跟 Hint 模式里同一位置敲的字母一样，形成肌肉记忆。
+// 列落在命令键字母上、或同格已被占：挪到离框中心最近的可用格（列换成相邻的可用字母，行尽量不变）。
+// 可用格用完的丢掉离光标最远的
 std::vector<Target> BuildTargets(std::vector<RECT> rects) {
-    const size_t L = g_alphabet.size();
-    const size_t cap = L * L;
+    int freeCols = 0;
+    for (bool b : g_colBanned) if (!b) freeCols++;
+    const size_t cap = (size_t)freeCols * kGrid;
     if (rects.size() > cap) {
         POINT p; GetCursorPos(&p);
-        auto d2 = [&p](const RECT& r) { POINT c = Center(r); long long dx = c.x - p.x, dy = c.y - p.y; return dx * dx + dy * dy; };
-        std::nth_element(rects.begin(), rects.begin() + cap, rects.end(), [&](const RECT& a, const RECT& b) { return d2(a) < d2(b); });
+        std::nth_element(rects.begin(), rects.begin() + cap, rects.end(),
+                         [&](const RECT& a, const RECT& b) { return Dist2(Center(a), p) < Dist2(Center(b), p); });
         rects.resize(cap);
     }
-    // 阅读顺序（按 24px 行分桶，再从左到右）
-    std::sort(rects.begin(), rects.end(), [](const RECT& a, const RECT& b) {
-        int ra = Center(a).y / 24, rb = Center(b).y / 24;
-        return ra != rb ? ra < rb : a.left < b.left;
-    });
-    std::vector<Target> out;
-    for (size_t i = 0; i < rects.size(); i++) {
-        Target t; t.rc = rects[i];
-        if (rects.size() <= L) t.label = std::string(1, g_alphabet[i]);
-        else t.label = std::string{ g_alphabet[i / L], g_alphabet[i % L] };
-        out.push_back(t);
+    struct Item { RECT rc; POINT c; int col, row; long long d; };
+    std::vector<Item> items;
+    for (const RECT& r : rects) {
+        Item it{ r, Center(r) };
+        CellOf(it.c, it.col, it.row);
+        it.d = Dist2(it.c, HintCellCenter(g_area, it.col, it.row));
+        items.push_back(it);
     }
+    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.d < b.d; });
+    bool used[kGrid][kGrid] = {};
+    for (int c = 0; c < kGrid; c++) if (g_colBanned[c]) for (int r = 0; r < kGrid; r++) used[c][r] = true;
+    std::vector<Target> out;
+    for (const Item& it : items) {
+        int col = it.col, row = it.row;
+        if (used[col][row]) {
+            long long best = -1;
+            for (int c = 0; c < kGrid; c++)
+                for (int r = 0; r < kGrid; r++) {
+                    if (used[c][r]) continue;
+                    long long d = Dist2(it.c, HintCellCenter(g_area, c, r));
+                    if (best < 0 || d < best) { best = d; col = c; row = r; }
+                }
+        }
+        used[col][row] = true;
+        out.push_back({ it.rc, CellLabel(col, row) });
+    }
+    // 稳定顺序（按标签），SameTargets 才能判"结果没变"
+    std::sort(out.begin(), out.end(), [](const Target& a, const Target& b) { return a.label < b.label; });
     return out;
 }
 
@@ -497,6 +540,12 @@ void SelectTarget(int i) {
     Redraw();
 }
 
+// 两段区间 [a0,a1) 与 [b0,b1) 之间的空隙；重叠 = 0
+static long Gap(long a0, long a1, long b0, long b1) { return max(0L, max(b0 - a1, a0 - b1)); }
+
+// 按「边到边」距离找：宽框（如整行的 +N lines）中心离得远但边紧挨着，也该优先。
+// primary = 该方向上两框之间的空隙，perp = 垂直方向的空隙（同一行/列内为 0）；
+// 垂直偏离罚得重（×2.5），中心距离只做轻微的平局裁决
 int FindInDirection(unsigned bit) {
     POINT o; RECT cur;
     if (g_sel >= 0) { cur = g_targets[g_sel].rc; o = Center(cur); }
@@ -506,32 +555,42 @@ int FindInDirection(unsigned bit) {
         if (i == g_sel) continue;
         const RECT& r = g_targets[i].rc;
         POINT c = Center(r);
-        double primary, secondary; bool overlap;
+        double ahead, primary, perp, centerOff;
         switch (bit) {
-        case MV_RIGHT: primary = c.x - o.x; secondary = abs(c.y - o.y); overlap = r.top < cur.bottom && r.bottom > cur.top; break;
-        case MV_LEFT:  primary = o.x - c.x; secondary = abs(c.y - o.y); overlap = r.top < cur.bottom && r.bottom > cur.top; break;
-        case MV_DOWN:  primary = c.y - o.y; secondary = abs(c.x - o.x); overlap = r.left < cur.right && r.right > cur.left; break;
-        case MV_UP:    primary = o.y - c.y; secondary = abs(c.x - o.x); overlap = r.left < cur.right && r.right > cur.left; break;
+        case MV_RIGHT: ahead = c.x - o.x; primary = max(0L, r.left - cur.right);  perp = Gap(cur.top, cur.bottom, r.top, r.bottom); centerOff = abs(c.y - o.y); break;
+        case MV_LEFT:  ahead = o.x - c.x; primary = max(0L, cur.left - r.right);  perp = Gap(cur.top, cur.bottom, r.top, r.bottom); centerOff = abs(c.y - o.y); break;
+        case MV_DOWN:  ahead = c.y - o.y; primary = max(0L, r.top - cur.bottom);  perp = Gap(cur.left, cur.right, r.left, r.right); centerOff = abs(c.x - o.x); break;
+        case MV_UP:    ahead = o.y - c.y; primary = max(0L, cur.top - r.bottom);  perp = Gap(cur.left, cur.right, r.left, r.right); centerOff = abs(c.x - o.x); break;
         default: return -1;
         }
-        if (primary <= 2) continue;
-        double score = primary + secondary * (overlap ? 0.3 : 2.0);
+        if (ahead <= 2) continue;   // 中心必须确实在那个方向
+        double score = primary + perp * 2.5 + (ahead + centerOff) * 0.05;
         if (score < bestScore) { bestScore = score; best = i; }
     }
     return best;
 }
 
+// 跟 Hint 一样两字母一组：第一个是列，第二个是行。
+// 正好有框标着这个坐标就选它；没有（那格是空的）就选离那格中心最近的框 —— 照 Hint 习惯敲也能落到附近的按钮。
+// 选中后停在本模式：接着可以 hjkl 微调、f 点击，或者再敲一组坐标
 void TypeLetter(char ch) {
     if (g_targets.empty()) return;
+    if (g_prefix.empty()) { g_prefix = ch; Redraw(); return; }
     std::string want = g_prefix + ch;
-    bool anyPrefix = false;
-    for (int i = 0; i < (int)g_targets.size(); i++) {
-        const std::string& lb = g_targets[i].label;
-        if (lb == want) { g_prefix.clear(); SelectTarget(i); return; }
-        if (lb.compare(0, want.size(), want) == 0) anyPrefix = true;
+    g_prefix.clear();
+    int pick = -1;
+    for (int i = 0; i < (int)g_targets.size() && pick < 0; i++)
+        if (g_targets[i].label == want) pick = i;
+    if (pick < 0) {
+        POINT cc = HintCellCenter(g_area, want[0] - 'A', want[1] - 'A');
+        long long best = -1;
+        for (int i = 0; i < (int)g_targets.size(); i++) {
+            long long d = Dist2(Center(g_targets[i].rc), cc);
+            if (best < 0 || d < best) { best = d; pick = i; }
+        }
     }
-    g_prefix = anyPrefix ? want : std::string();
-    Redraw();
+    g_moveTrail.clear();
+    SelectTarget(pick);
 }
 
 void DoClick(Button b) {
@@ -542,11 +601,10 @@ void DoClick(Button b) {
 }
 
 int PaletteIndex(const Target& t) {
-    size_t k = g_alphabet.find(t.label[0]);
-    return (int)((k == std::string::npos ? 0 : k) % _countof(kPalette));
+    return (t.label[0] - 'A') % (int)_countof(kPalette);
 }
 
-void DrawPill(HDC dc, const RECT& client, const std::wstring& text) {
+RECT DrawPill(HDC dc, const RECT& client, const std::wstring& text) {
     HGDIOBJ old = SelectObject(dc, g_msgFont);
     SIZE sz; GetTextExtentPoint32W(dc, text.c_str(), (int)text.size(), &sz);
     int w = sz.cx + 40, h = sz.cy + 20;
@@ -557,10 +615,15 @@ void DrawPill(HDC dc, const RECT& client, const std::wstring& text) {
     SetTextColor(dc, RGB(255, 230, 120));
     DrawTextW(dc, text.c_str(), (int)text.size(), &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(dc, old);
+    return r;
 }
 
-void Paint(HWND hwnd) {
-    DoubleBuffer db(hwnd);
+// 未选中的框和标签的不透明度（0-255）：半透，底下的内容还看得清；选中的那个和提示条是 255
+constexpr BYTE kDimAlpha = 140;
+
+// 画到 dc（客户区 rc = 整个屏幕区域）；opaque 收集要保持不透明的区域（选中的框 + 标签、提示条）
+void DrawScene(HDC dc, const RECT& rc, std::vector<RECT>& opaque) {
+    struct { HDC mem; RECT rc; } db = { dc, rc };
     HBRUSH key = CreateSolidBrush(kKey);
     FillRect(db.mem, &db.rc, key);
     DeleteObject(key);
@@ -584,6 +647,7 @@ void Paint(HWND hwnd) {
         OffsetRect(&r, -g_area.left, -g_area.top);
         SelectObject(db.mem, i == g_sel ? selPen : pens[PaletteIndex(t)]);
         Rectangle(db.mem, r.left, r.top, r.right, r.bottom);
+        if (i == g_sel) { InflateRect(&r, 3, 3); opaque.push_back(r); }
     }
     SelectObject(db.mem, oldBrush);
     SelectObject(db.mem, oldPen);
@@ -600,13 +664,18 @@ void Paint(HWND hwnd) {
         int x = max(0, min((int)db.rc.right - w, (int)r.left - 2));
         int y = max(0, min((int)db.rc.bottom - h, (int)r.top - 2));
         RECT box = { x, y, x + w, y + h };
-        FillRect(db.mem, &box, i == g_sel ? selBg : brushes[PaletteIndex(t)]);
-        FrameRect(db.mem, &box, border);
+        if (i == g_sel) opaque.push_back(box);
+        // 反色：未选中 = 深底 + 彩色字（首字母用本组颜色、第二个字母白色）；选中 = 亮绿底 + 黑字
+        const bool sel = (i == g_sel);
+        FillRect(db.mem, &box, sel ? selBg : border);
+        FrameRect(db.mem, &box, sel ? border : brushes[PaletteIndex(t)]);
         int tx = x + 4;
         for (size_t k = 0; k < t.label.size(); k++) {
-            // 已输入的字母变灰；第一个字母黑、第二个字母深红，两字母标签的边界一眼看清
+            // 已输入的字母变灰；两个字母颜色不同，两字母标签的边界一眼看清
             bool typed = k < g_prefix.size();
-            SetTextColor(db.mem, typed ? RGB(120, 120, 120) : (k == 0 ? RGB(0, 0, 0) : RGB(170, 0, 0)));
+            COLORREF fg = sel ? (k == 0 ? RGB(0, 0, 0) : RGB(170, 0, 0))
+                              : (k == 0 ? kPalette[PaletteIndex(t)] : RGB(255, 255, 255));
+            SetTextColor(db.mem, typed ? RGB(120, 120, 120) : fg);
             TextOutA(db.mem, tx, y + 1, &t.label[k], 1);
             SIZE cs; GetTextExtentPoint32A(db.mem, &t.label[k], 1, &cs);
             tx += cs.cx;
@@ -619,7 +688,66 @@ void Paint(HWND hwnd) {
     DeleteObject(selBg);
     DeleteObject(border);
 
-    if (!g_msg.empty()) DrawPill(db.mem, db.rc, g_msg);
+    if (!g_msg.empty()) opaque.push_back(DrawPill(db.mem, db.rc, g_msg));
+}
+
+// 逐像素 alpha 的分层窗口（UpdateLayeredWindow）：透明色 → 全透；opaque 区域 → 不透明；其余 → kDimAlpha
+void Render() {
+    if (!g_wnd || !g_clickMode) return;
+    const int w = RectW(g_area), h = RectH(g_area);
+    if (w <= 0 || h <= 0) return;
+    HDC screen = GetDC(NULL);
+    HDC mem = CreateCompatibleDC(screen);
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;   // 自上而下
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bmp || !bits) {
+        if (bmp) DeleteObject(bmp);
+        DeleteDC(mem);
+        ReleaseDC(NULL, screen);
+        return;
+    }
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    SetBkMode(mem, TRANSPARENT);
+    RECT rc = { 0, 0, w, h };
+    std::vector<RECT> opaque;
+    DrawScene(mem, rc, opaque);
+    GdiFlush();
+
+    const DWORD keyPx = ((DWORD)GetRValue(kKey) << 16) | ((DWORD)GetGValue(kKey) << 8) | GetBValue(kKey);
+    std::vector<BYTE> rowA(w);
+    DWORD* px = (DWORD*)bits;
+    for (int y = 0; y < h; y++) {
+        std::fill(rowA.begin(), rowA.end(), kDimAlpha);
+        for (const RECT& o : opaque) {
+            if (y < o.top || y >= o.bottom) continue;
+            for (int x = max(0, (int)o.left); x < min(w, (int)o.right); x++) rowA[x] = 255;
+        }
+        DWORD* row = px + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            DWORD c = row[x] & 0xFFFFFF;
+            if (c == keyPx) { row[x] = 0; continue; }
+            DWORD a = rowA[x];
+            DWORD r = ((c >> 16) & 0xFF) * a / 255, g = ((c >> 8) & 0xFF) * a / 255, b = (c & 0xFF) * a / 255;
+            row[x] = (a << 24) | (r << 16) | (g << 8) | b;   // 预乘 alpha
+        }
+    }
+
+    POINT dst = { g_area.left, g_area.top }, src = { 0, 0 };
+    SIZE sz = { w, h };
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    UpdateLayeredWindow(g_wnd, screen, &dst, &sz, mem, &src, 0, &bf, ULW_ALPHA);
+
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(NULL, screen);
 }
 
 void OnScanDone(HWND hwnd, ScanResult* r) {
@@ -669,10 +797,13 @@ LRESULT CALLBACK ClickWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (wParam == kExitTimer) { KillTimer(hwnd, kExitTimer); if (g_clickMode && g_targets.empty() && !g_scanning) ExitClickMode(); }
         return 0;
     case WM_ERASEBKGND:
-        return 1;   // 整窗都由 WM_PAINT 双缓冲画；不擦背景，否则每次重画先刷一遍黑底 → 闪
-    case WM_PAINT:
-        Paint(hwnd);
+        return 1;
+    case WM_PAINT: {   // 内容全由 Render() 经 UpdateLayeredWindow 推上去，这里只确认失效区
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
         return 0;
+    }
     case WM_DESTROY:
         if (g_font) { DeleteObject(g_font); g_font = NULL; }
         if (g_msgFont) { DeleteObject(g_msgFont); g_msgFont = NULL; }
@@ -694,7 +825,13 @@ bool IsModVk(DWORD vk) {
 void CreateClickWindow() {
     g_wnd = CreateOverlayWindow(L"VimouseClickables", ClickWndProc,
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, 0, 0, 0, 0, 255);
-    if (g_wnd) SetLayeredWindowAttributes(g_wnd, kKey, 235, LWA_COLORKEY | LWA_ALPHA);
+    if (g_wnd) {
+        // CreateOverlayWindow 用过 SetLayeredWindowAttributes，之后 UpdateLayeredWindow 会失败：
+        // 摘掉再加回 WS_EX_LAYERED 重置成"逐像素 alpha"分层窗口
+        LONG ex = GetWindowLongW(g_wnd, GWL_EXSTYLE);
+        SetWindowLongW(g_wnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+        SetWindowLongW(g_wnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+    }
     GetScanner(false).Post([] {});   // 提前起扫描线程、建好 UIA 对象，第一次进模式也省掉这段
     GetScanner(true).Post([] {});
 }
@@ -707,11 +844,12 @@ void EnterClickMode() {
     if (!g_wnd) return;
     if (g_clickMode) { ExitClickMode(); return; }   // 再按一次 = 关闭（开关）
     g_clickMode = true;
-    BuildAlphabet();
+    BuildColumnBans();
     RefreshScreens();
     g_area = ScreenRectAt(GetCurrentScreenIndex());
     KillTimer(g_wnd, kExitTimer);
     g_sel = -1;
+    g_moveTrail.clear();
     g_prefix.clear();
     std::vector<WinSig> sig = Signature(g_area);
     if (g_cache.valid && !g_cache.rects.empty() && EqualRect(&g_cache.area, &g_area) && SameSig(g_cache.sig, sig)) {
@@ -738,6 +876,7 @@ void ExitClickMode() {
     g_scanning = false;
     g_targets.clear();
     g_sel = -1;
+    g_moveTrail.clear();
     g_prefix.clear();
     g_msg.clear();
     if (g_wnd) { KillTimer(g_wnd, kExitTimer); ShowWindow(g_wnd, SW_HIDE); }
@@ -753,6 +892,11 @@ bool HandleClickKeyDown(DWORD vk, Modifiers m) {
         return true;
     }
     if (IsModVk(vk)) return false;
+    // 已经输了坐标第一个字母：第二个字母 A-Z 全是坐标（包括 h/j/k/l/f/d），跟 Hint 一样
+    if (!g_prefix.empty() && vk >= 'A' && vk <= 'Z' && !m.ctrl && !m.alt) {
+        TypeLetter((char)vk);
+        return true;
+    }
     if (IsAction(Action::ClickMode, (WORD)vk, m)) { ExitClickMode(); return true; }   // d 是开关：再按一次关闭
     if (IsAction(Action::ClickLeft, (WORD)vk, m))  { DoClick(Button::Left); return true; }
     if (IsAction(Action::ClickRight, (WORD)vk, m)) { DoClick(Button::Right); return true; }
@@ -765,11 +909,25 @@ bool HandleClickKeyDown(DWORD vk, Modifiers m) {
     }
     if (bit) {
         g_prefix.clear();
+        const unsigned opposite = bit == MV_LEFT ? MV_RIGHT : bit == MV_RIGHT ? MV_LEFT : bit == MV_UP ? MV_DOWN : MV_UP;
+        if (!g_moveTrail.empty() && g_moveTrail.back().second == opposite) {   // 反方向：原路退回
+            int from = g_moveTrail.back().first;
+            g_moveTrail.pop_back();
+            if (from >= 0 && from < (int)g_targets.size()) { SelectTarget(from); return true; }
+            g_moveTrail.clear();
+        }
+        const int from = g_sel;
         int i = FindInDirection(bit);
-        if (i >= 0) SelectTarget(i); else Redraw();
+        if (i >= 0) {
+            if (from >= 0) g_moveTrail.push_back({ from, bit });
+            SelectTarget(i);
+        } else {
+            Redraw();
+        }
         return true;
     }
-    if (vk >= 'A' && vk <= 'Z' && !m.ctrl && !m.alt && g_alphabet.find((char)vk) != std::string::npos) {
+    // 坐标第一个字母：命令键（hjkl/f/g/d）以外的 A-Z
+    if (vk >= 'A' && vk <= 'Z' && !m.ctrl && !m.alt && !IsCommandLetter((char)vk)) {
         TypeLetter((char)vk);
         return true;
     }
