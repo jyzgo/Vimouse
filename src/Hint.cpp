@@ -4,11 +4,148 @@
 #include "Screens.h"
 #include "Grid.h"
 #include "Indicator.h"
+#include <vector>
 
 static const int N = 26;
 static HFONT  g_font = NULL;
 static int    g_fontH = 0;
 static HBRUSH g_dark = NULL, g_light = NULL;
+
+// 选中一列之后：窗口切成不透明，画「压暗的屏幕快照」当蒙版（跟没选列时的观感一致），
+// 选中那一列的字母用亮黄色 + 黑色实心描边，完全不透明 —— 压在什么文字上都看得清。
+// 快照在 Hint 窗口显示之前截，里面是干净的屏幕。
+static HBITMAP g_snap = NULL;
+static DWORD*  g_snapBits = nullptr;
+static int     g_snapW = 0, g_snapH = 0;
+static const BYTE     kWndAlpha  = 100;               // 没选列时整窗半透明度（原样）
+static const COLORREF kFocusText = RGB(255, 214, 0);  // 选中列字母
+
+static HBITMAP MakeDib(HDC ref, int w, int h, DWORD** bits) {
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;   // 自上而下
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* p = nullptr;
+    HBITMAP b = CreateDIBSection(ref, &bi, DIB_RGB_COLORS, &p, NULL, 0);
+    if (b && !p) { DeleteObject(b); b = NULL; }
+    *bits = (DWORD*)p;
+    return b;
+}
+
+static void FreeSnapshot() {
+    if (g_snap) { DeleteObject(g_snap); g_snap = NULL; }
+    g_snapBits = nullptr;
+    g_snapW = g_snapH = 0;
+}
+
+static void TakeSnapshot(const RECT& sr) {
+    FreeSnapshot();
+    const int w = RectW(sr), h = RectH(sr);
+    if (w <= 0 || h <= 0) return;
+    HDC screen = GetDC(NULL);
+    HDC mem = CreateCompatibleDC(screen);
+    DWORD* bits = nullptr;
+    g_snap = MakeDib(screen, w, h, &bits);
+    if (g_snap) {
+        HGDIOBJ old = SelectObject(mem, g_snap);
+        BitBlt(mem, 0, 0, w, h, screen, sr.left, sr.top, SRCCOPY | CAPTUREBLT);
+        SelectObject(mem, old);
+        GdiFlush();
+        g_snapBits = bits;
+        g_snapW = w; g_snapH = h;
+    }
+    DeleteDC(mem);
+    ReleaseDC(NULL, screen);
+}
+
+// 选中一列时的整屏画面：蒙版 = 快照 × 61% + 原来的深色格子 × 39%（等同 alpha 100 叠加的观感），
+// 再把选中列的字母画成黄色 + 2px 黑色实心描边
+static void PaintFocusColumn(HDC dst, const RECT& rc, int focusCol) {
+    const int w = RectW(rc), h = RectH(rc);
+    DWORD *out = nullptr, *mask = nullptr;
+    HBITMAP obmp = MakeDib(dst, w, h, &out);
+    HBITMAP mbmp = MakeDib(dst, w, h, &mask);   // 初始全 0
+    if (!obmp || !mbmp) {
+        if (obmp) DeleteObject(obmp);
+        if (mbmp) DeleteObject(mbmp);
+        return;
+    }
+    const int a = kWndAlpha;
+    for (int row = 0; row < N; row++)
+        for (int col = 0; col < N; col++) {
+            RECT c = HintCellRect(rc, col, row);
+            // 原来的深色格子 RGB(35,35,50) / RGB(15,15,25)，按 shift 0/8/16 = B/G/R
+            const bool lightCell = ((row + col) & 1) != 0;
+            const int bgc[3] = { lightCell ? 50 : 25, lightCell ? 35 : 15, lightCell ? 35 : 15 };
+            for (int y = max(0L, c.top); y < min((LONG)h, c.bottom); y++)
+                for (int x = max(0L, c.left); x < min((LONG)w, c.right); x++) {
+                    size_t i = (size_t)y * w + x;
+                    DWORD p = g_snapBits[i], v = 0;
+                    for (int k = 0; k < 3; k++) {
+                        int s = (p >> (k * 8)) & 0xFF;
+                        v |= (DWORD)((s * (255 - a) + bgc[k] * a) / 255) << (k * 8);
+                    }
+                    out[i] = v;
+                }
+        }
+
+    // 选中列的字母先画进遮罩（白 = 字形，抗锯齿）
+    HDC mdc = CreateCompatibleDC(dst);
+    HGDIOBJ oldM = SelectObject(mdc, mbmp);
+    HGDIOBJ oldF = SelectObject(mdc, g_font);
+    SetBkMode(mdc, TRANSPARENT);
+    SetTextColor(mdc, RGB(255, 255, 255));
+    for (int row = 0; row < N; row++) {
+        RECT cell = HintCellRect(rc, focusCol, row);
+        char s[3] = { (char)('A' + focusCol), (char)('A' + row), 0 };
+        DrawTextA(mdc, s, 2, &cell, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+    SelectObject(mdc, oldF);
+    SelectObject(mdc, oldM);
+    DeleteDC(mdc);
+    GdiFlush();
+
+    // 合成：字形外扩 2px 是黑色描边，字形本身黄色
+    RECT colR = HintCellRect(rc, focusCol, 0);
+    const int x0 = max(0L, colR.left), x1 = min((LONG)w, colR.right), bw = x1 - x0;
+    if (bw > 0) {
+        const int R = 2;
+        std::vector<BYTE> m((size_t)bw * h), tmp((size_t)bw * h);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < bw; x++) {
+                DWORD q = mask[(size_t)y * w + x0 + x];
+                m[(size_t)y * bw + x] = (BYTE)max(max((q >> 16) & 0xFF, (q >> 8) & 0xFF), q & 0xFF);
+            }
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < bw; x++) {
+                BYTE v = 0;
+                for (int k = max(0, x - R); k <= min(bw - 1, x + R); k++) v = max(v, m[(size_t)y * bw + k]);
+                tmp[(size_t)y * bw + x] = v;
+            }
+        const int fg[3] = { GetBValue(kFocusText), GetGValue(kFocusText), GetRValue(kFocusText) };
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < bw; x++) {
+                bool halo = false;
+                for (int k = max(0, y - R); k <= min(h - 1, y + R) && !halo; k++) halo = tmp[(size_t)k * bw + x] != 0;
+                if (!halo) continue;
+                const int g = m[(size_t)y * bw + x];
+                DWORD v = 0;
+                for (int c = 0; c < 3; c++) v |= (DWORD)(fg[c] * g / 255) << (c * 8);
+                out[(size_t)y * w + x0 + x] = v;
+            }
+    }
+    DeleteObject(mbmp);
+
+    HDC odc = CreateCompatibleDC(dst);
+    HGDIOBJ oldO = SelectObject(odc, obmp);
+    BitBlt(dst, 0, 0, w, h, odc, 0, 0, SRCCOPY);
+    SelectObject(odc, oldO);
+    DeleteDC(odc);
+    DeleteObject(obmp);
+}
 
 RECT HintCellRect(const RECT& a, int col, int row) {
     int w = RectW(a), h = RectH(a);
@@ -32,9 +169,15 @@ static LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (!g_dark)  g_dark = CreateSolidBrush(RGB(15, 15, 25));
         if (!g_light) g_light = CreateSolidBrush(RGB(35, 35, 50));
 
+        int filterCol = (g_currentHint.size() == 1) ? g_currentHint[0] - 'A' : -1;
+        const bool focus = filterCol >= 0 && filterCol < N && g_snapBits && g_snapW == db.Width() && g_snapH == db.Height();
+        SetLayeredWindowAttributes(hwnd, 0, focus ? 255 : kWndAlpha, LWA_ALPHA);
+        if (focus) {
+            PaintFocusColumn(db.mem, db.rc, filterCol);
+            return 0;
+        }
         HGDIOBJ old = SelectObject(db.mem, g_font);
         SetTextColor(db.mem, RGB(255, 255, 255));
-        int filterCol = (g_currentHint.size() == 1) ? g_currentHint[0] - 'A' : -1;
         for (int row = 0; row < N; row++) {
             for (int col = 0; col < N; col++) {
                 RECT cell = HintCellRect(db.rc, col, row);
@@ -62,6 +205,7 @@ static LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         ExitHintMode(false);
         return 0;
     case WM_DESTROY:
+        FreeSnapshot();
         if (g_font)  { DeleteObject(g_font);  g_font = NULL; }
         if (g_dark)  { DeleteObject(g_dark);  g_dark = NULL; }
         if (g_light) { DeleteObject(g_light); g_light = NULL; }
@@ -81,11 +225,13 @@ void EnterHintMode() {
     g_currentHint.clear();
     g_hintScreenIndex = GetCurrentScreenIndex();
     RECT sr = ScreenRectAt(g_hintScreenIndex);
+    if (g_indicatorWindow) ShowWindow(g_indicatorWindow, SW_HIDE);   // 先藏起来，免得被截进快照
+    TakeSnapshot(sr);   // Hint 窗口显示之前截：选中一列后用它当蒙版底图
+    SetLayeredWindowAttributes(g_hintWindow, 0, kWndAlpha, LWA_ALPHA);
     MoveWindow(g_hintWindow, sr.left, sr.top, RectW(sr), RectH(sr), TRUE);
     ShowWindow(g_hintWindow, SW_SHOWNA);
     InvalidateRect(g_hintWindow, NULL, TRUE);
     UpdateWindow(g_hintWindow);
-    if (g_indicatorWindow) ShowWindow(g_indicatorWindow, SW_HIDE);
 }
 
 void ExitHintMode(bool showMiniGrid) {
@@ -93,6 +239,7 @@ void ExitHintMode(bool showMiniGrid) {
     g_hintMode = false;
     g_currentHint.clear();
     ShowWindow(g_hintWindow, SW_HIDE);
+    FreeSnapshot();
     g_mouseSpeed = g_lastSetSpeed = 15;   // Hint 之后微调，起步速度略快
     UpdateIndicatorPosition();
     if (showMiniGrid) EnterMiniGrid();

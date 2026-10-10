@@ -4,10 +4,13 @@
 #include "Screens.h"
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 // 使用 UpdateLayeredWindow（逐像素 alpha）：圆角真正透明，整体 alpha 用于渐隐。
 
 #define TIMER_FADE 1
+#define TIMER_HOLD 2
+#define TIMER_PULSE 3
 
 namespace {
 
@@ -17,6 +20,7 @@ std::vector<WORD> g_held;      // 当前按住的非修饰键（按下顺序）
 std::wstring g_text;
 int   g_alpha = 0;
 bool  g_fading = false;
+bool  g_statusHold = false;    // 正在显示状态文字：松键不收起，到时自己渐隐
 const int kAlphaMax = 235;
 const int kHeight = 60, kRadius = 14, kPadX = 26, kMinW = 72, kBottomGap = 72;
 
@@ -151,6 +155,12 @@ void StopFade() {
 LRESULT CALLBACK OsdWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_TIMER:
+        if (wParam == TIMER_HOLD) {
+            KillTimer(hwnd, TIMER_HOLD);
+            g_statusHold = false;
+            if (g_held.empty()) StartFade();
+            return 0;
+        }
         if (wParam == TIMER_FADE) {
             g_alpha -= 16;
             if (g_alpha <= 0) {
@@ -184,6 +194,12 @@ void KeyOsd_Create() {
 
 void KeyOsd_KeyDown(WORD vk, Modifiers m) {
     if (!g_osd || !g_settings.keyOsd) return;
+    if (g_statusHold) {
+        // 开关键还按着时的自动重复 / 修饰键：不覆盖状态文字；真正的新键才覆盖
+        if (IsModifier(vk) || std::find(g_held.begin(), g_held.end(), vk) != g_held.end()) return;
+        g_statusHold = false;
+        KillTimer(g_osd, TIMER_HOLD);
+    }
     if (!IsModifier(vk) && std::find(g_held.begin(), g_held.end(), vk) == g_held.end()) g_held.push_back(vk);
     std::wstring text = BuildText(m);
     if (text.empty()) return;
@@ -200,7 +216,7 @@ void KeyOsd_KeyDown(WORD vk, Modifiers m) {
 void KeyOsd_KeyUp(WORD vk) {
     if (!g_osd) return;
     g_held.erase(std::remove(g_held.begin(), g_held.end(), vk), g_held.end());
-    if (!IsWindowVisible(g_osd) || g_fading) return;
+    if (!IsWindowVisible(g_osd) || g_fading || g_statusHold) return;
 
     if (!g_held.empty()) {
         // 还有主键按着：刷新文字，不消失
@@ -214,7 +230,103 @@ void KeyOsd_KeyUp(WORD vk) {
 void KeyOsd_HideNow() {
     if (!g_osd) return;
     g_held.clear();
+    g_statusHold = false;
+    KillTimer(g_osd, TIMER_HOLD);
     StopFade();
     g_alpha = 0;
     ShowWindow(g_osd, SW_HIDE);
+}
+
+void KeyOsd_ShowStatus(const std::wstring& text) {
+    if (!g_osd || text.empty()) return;
+    g_text = text;
+    StopFade();
+    g_alpha = kAlphaMax;
+    Render(g_alpha);
+    ShowWindow(g_osd, SW_SHOWNA);
+    g_statusHold = true;
+    SetTimer(g_osd, TIMER_HOLD, 1000, NULL);
+}
+
+// ===================== 光标脉冲 =====================
+namespace {
+
+HWND  g_pulse = NULL;
+DWORD g_pulseStart = 0;
+bool  g_pulseOn = true;
+const int   kPulseSize = 96;      // 窗口边长（以光标为中心）
+const DWORD kPulseMs = 450;
+
+void RenderPulse() {
+    float t = min(1.0f, (GetTickCount() - g_pulseStart) / (float)kPulseMs);
+    float ease = 1.0f - (1.0f - t) * (1.0f - t);
+    float R = 44.0f - 32.0f * ease;               // 圆环从 44px 收到 12px
+    float fade = t < 0.6f ? 1.0f : (1.0f - t) / 0.4f;
+    COLORREF col = g_pulseOn ? RGB(0, 230, 120) : RGB(170, 170, 180);
+    const int S = kPulseSize, c = S / 2;
+
+    HDC screen = GetDC(NULL);
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = S;
+    bmi.bmiHeader.biHeight = -S;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    DWORD* px = nullptr;
+    HBITMAP bmp = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, (void**)&px, NULL, 0);
+    if (!bmp) { ReleaseDC(NULL, screen); return; }
+    for (int y = 0; y < S; y++)
+        for (int x = 0; x < S; x++) {
+            float dx = x - c + 0.5f, dy = y - c + 0.5f;
+            float d = sqrtf(dx * dx + dy * dy);
+            float a = max(0.0f, 1.0f - fabsf(d - R) / 2.0f);   // 圆环（约 3px 宽，边缘柔化）
+            // 十字臂：从圆环内侧伸到外侧，中心留空不挡目标
+            float ax = fabsf(dx), ay = fabsf(dy);
+            float armIn = R * 0.45f, armOut = R + 10.0f;
+            if ((ax <= 1.2f && ay >= armIn && ay <= armOut) || (ay <= 1.2f && ax >= armIn && ax <= armOut)) a = max(a, 1.0f);
+            a *= fade;
+            DWORD A = (DWORD)(a * 255.0f + 0.5f);
+            px[y * S + x] = (A << 24) | ((GetRValue(col) * A / 255) << 16) | ((GetGValue(col) * A / 255) << 8) | (GetBValue(col) * A / 255);
+        }
+    HDC mem = CreateCompatibleDC(screen);
+    HGDIOBJ old = SelectObject(mem, bmp);
+    POINT cur; GetCursorPos(&cur);
+    POINT dst = { cur.x - c, cur.y - c }, src = { 0, 0 };
+    SIZE size = { S, S };
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    UpdateLayeredWindow(g_pulse, screen, &dst, &size, mem, &src, 0, &bf, ULW_ALPHA);
+    SetWindowPos(g_pulse, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    SelectObject(mem, old);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(NULL, screen);
+}
+
+LRESULT CALLBACK PulseWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_TIMER && wParam == TIMER_PULSE) {
+        if (GetTickCount() - g_pulseStart >= kPulseMs) { KillTimer(hwnd, TIMER_PULSE); ShowWindow(hwnd, SW_HIDE); }
+        else RenderPulse();
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+}  // namespace
+
+void KeyOsd_CursorPulse(bool on) {
+    if (!g_pulse) {
+        WNDCLASSEXW wc = { sizeof(wc) };
+        wc.lpfnWndProc = PulseWndProc;
+        wc.hInstance = GetModuleHandle(NULL);
+        wc.lpszClassName = L"VimouseCursorPulse";
+        RegisterClassExW(&wc);
+        g_pulse = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                                  L"VimouseCursorPulse", NULL, WS_POPUP, 0, 0, kPulseSize, kPulseSize, NULL, NULL, GetModuleHandle(NULL), NULL);
+        if (!g_pulse) return;
+    }
+    g_pulseOn = on;
+    g_pulseStart = GetTickCount();
+    RenderPulse();
+    SetTimer(g_pulse, TIMER_PULSE, 16, NULL);
 }

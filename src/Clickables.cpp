@@ -665,17 +665,14 @@ void DrawScene(HDC dc, const RECT& rc, std::vector<RECT>& opaque) {
         int y = max(0, min((int)db.rc.bottom - h, (int)r.top - 2));
         RECT box = { x, y, x + w, y + h };
         if (i == g_sel) opaque.push_back(box);
-        // 反色：未选中 = 深底 + 彩色字（首字母用本组颜色、第二个字母白色）；选中 = 亮绿底 + 黑字
-        const bool sel = (i == g_sel);
-        FillRect(db.mem, &box, sel ? selBg : border);
-        FrameRect(db.mem, &box, sel ? border : brushes[PaletteIndex(t)]);
+        // 彩色底 + 黑框；选中 = 亮绿底
+        FillRect(db.mem, &box, i == g_sel ? selBg : brushes[PaletteIndex(t)]);
+        FrameRect(db.mem, &box, border);
         int tx = x + 4;
         for (size_t k = 0; k < t.label.size(); k++) {
-            // 已输入的字母变灰；两个字母颜色不同，两字母标签的边界一眼看清
+            // 已输入的字母变灰；第二个字母深红，两字母标签的边界一眼看清
             bool typed = k < g_prefix.size();
-            COLORREF fg = sel ? (k == 0 ? RGB(0, 0, 0) : RGB(170, 0, 0))
-                              : (k == 0 ? kPalette[PaletteIndex(t)] : RGB(255, 255, 255));
-            SetTextColor(db.mem, typed ? RGB(120, 120, 120) : fg);
+            SetTextColor(db.mem, typed ? RGB(120, 120, 120) : (k == 0 ? RGB(0, 0, 0) : RGB(170, 0, 0)));
             TextOutA(db.mem, tx, y + 1, &t.label[k], 1);
             SIZE cs; GetTextExtentPoint32A(db.mem, &t.label[k], 1, &cs);
             tx += cs.cx;

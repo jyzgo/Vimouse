@@ -15,6 +15,7 @@
 #include "Indicator.h"
 #include "KeyOsd.h"
 #include "Screens.h"
+#include "Util.h"
 
 namespace {
 
@@ -407,6 +408,10 @@ void ToggleActive(bool centerCursor) {
         SetCursorPos(c.x, c.y);
         UpdateIndicatorPosition();
     }
+    // 开关反馈：底部按键提示的位置显示状态 + 光标处十字准星脉冲（不管右侧提示框开没开）
+    const bool zh = IsSystemChinese();
+    KeyOsd_ShowStatus(g_isActive ? (zh ? L"Vimouse 已开启" : L"Vimouse ON") : (zh ? L"Vimouse 已关闭" : L"Vimouse OFF"));
+    KeyOsd_CursorPulse(g_isActive);
 }
 
 void ToggleRemote() {
