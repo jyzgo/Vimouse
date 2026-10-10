@@ -11,14 +11,16 @@ static HFONT  g_font = NULL;
 static int    g_fontH = 0;
 static HBRUSH g_dark = NULL, g_light = NULL;
 
-// 选中一列之后：窗口切成不透明，画「压暗的屏幕快照」当蒙版（跟没选列时的观感一致），
-// 选中那一列的字母用亮黄色 + 黑色实心描边，完全不透明 —— 压在什么文字上都看得清。
+// 窗口不透明，画「压暗的屏幕快照」当蒙版（跟原来半透明格子的观感一致），字母加黑色实心描边：
+// 默认：列号（第一个字母）黄色、行号白色；选中一列后：只剩那一列，两个字母都黄色。
 // 快照在 Hint 窗口显示之前截，里面是干净的屏幕。
 static HBITMAP g_snap = NULL;
 static DWORD*  g_snapBits = nullptr;
 static int     g_snapW = 0, g_snapH = 0;
-static const BYTE     kWndAlpha  = 100;               // 没选列时整窗半透明度（原样）
-static const COLORREF kFocusText = RGB(255, 214, 0);  // 选中列字母
+static HFONT   g_maskFont = NULL;                     // 遮罩用灰度抗锯齿字体（ClearType 会串色）
+static int     g_maskFontH = 0;
+static const BYTE     kWndAlpha  = 100;               // 没有快照时的退路：整窗半透明（原样）
+static const COLORREF kFocusText = RGB(255, 214, 0);  // 列号 / 选中列字母
 
 static HBITMAP MakeDib(HDC ref, int w, int h, DWORD** bits) {
     BITMAPINFO bi = {};
@@ -61,8 +63,8 @@ static void TakeSnapshot(const RECT& sr) {
     ReleaseDC(NULL, screen);
 }
 
-// 选中一列时的整屏画面：蒙版 = 快照 × 61% + 原来的深色格子 × 39%（等同 alpha 100 叠加的观感），
-// 再把选中列的字母画成黄色 + 2px 黑色实心描边
+// 整屏画面：蒙版 = 快照 × 61% + 原来的深色格子 × 39%（等同 alpha 100 叠加的观感），
+// 再画字母 + 2px 黑色实心描边。focusCol < 0 = 全部列（列号黄、行号白）；否则只画那一列（全黄）
 static void PaintFocusColumn(HDC dst, const RECT& rc, int focusCol) {
     const int w = RectW(rc), h = RectH(rc);
     DWORD *out = nullptr, *mask = nullptr;
@@ -92,32 +94,51 @@ static void PaintFocusColumn(HDC dst, const RECT& rc, int focusCol) {
                 }
         }
 
-    // 选中列的字母先画进遮罩（白 = 字形，抗锯齿）
+    // 字母先画进遮罩：第一个字母画在红通道、第二个画在绿通道（灰度抗锯齿，通道值 = 覆盖度）
+    const int fh = max(8, h / N / 2);
+    if (!g_maskFont || g_maskFontH != fh) {
+        if (g_maskFont) DeleteObject(g_maskFont);
+        g_maskFont = CreateFontW(fh, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                 CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Arial");
+        g_maskFontH = fh;
+    }
     HDC mdc = CreateCompatibleDC(dst);
     HGDIOBJ oldM = SelectObject(mdc, mbmp);
-    HGDIOBJ oldF = SelectObject(mdc, g_font);
+    HGDIOBJ oldF = SelectObject(mdc, g_maskFont);
     SetBkMode(mdc, TRANSPARENT);
-    SetTextColor(mdc, RGB(255, 255, 255));
-    for (int row = 0; row < N; row++) {
-        RECT cell = HintCellRect(rc, focusCol, row);
-        char s[3] = { (char)('A' + focusCol), (char)('A' + row), 0 };
-        DrawTextA(mdc, s, 2, &cell, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    for (int col = 0; col < N; col++) {
+        if (focusCol >= 0 && col != focusCol) continue;
+        for (int row = 0; row < N; row++) {
+            RECT cell = HintCellRect(rc, col, row);
+            char s[2] = { (char)('A' + col), (char)('A' + row) };
+            SIZE all, first;
+            GetTextExtentPoint32A(mdc, s, 2, &all);
+            GetTextExtentPoint32A(mdc, s, 1, &first);
+            const int tx = (cell.left + cell.right - all.cx) / 2, ty = (cell.top + cell.bottom - all.cy) / 2;
+            SetTextColor(mdc, RGB(255, 0, 0));
+            TextOutA(mdc, tx, ty, &s[0], 1);
+            SetTextColor(mdc, RGB(0, 255, 0));
+            TextOutA(mdc, tx + first.cx, ty, &s[1], 1);
+        }
     }
     SelectObject(mdc, oldF);
     SelectObject(mdc, oldM);
     DeleteDC(mdc);
     GdiFlush();
 
-    // 合成：字形外扩 2px 是黑色描边，字形本身黄色
-    RECT colR = HintCellRect(rc, focusCol, 0);
+    // 合成：字形外扩 2px 是黑色描边；第一个字母黄色，第二个字母白色（选中列时也是黄色）
+    RECT colR = focusCol >= 0 ? HintCellRect(rc, focusCol, 0) : rc;
     const int x0 = max(0L, colR.left), x1 = min((LONG)w, colR.right), bw = x1 - x0;
     if (bw > 0) {
         const int R = 2;
-        std::vector<BYTE> m((size_t)bw * h), tmp((size_t)bw * h);
+        std::vector<BYTE> m((size_t)bw * h), ca((size_t)bw * h), cb((size_t)bw * h), tmp((size_t)bw * h);
         for (int y = 0; y < h; y++)
             for (int x = 0; x < bw; x++) {
-                DWORD q = mask[(size_t)y * w + x0 + x];
-                m[(size_t)y * bw + x] = (BYTE)max(max((q >> 16) & 0xFF, (q >> 8) & 0xFF), q & 0xFF);
+                const DWORD q = mask[(size_t)y * w + x0 + x];
+                const size_t j = (size_t)y * bw + x;
+                ca[j] = (BYTE)((q >> 16) & 0xFF);
+                cb[j] = (BYTE)((q >> 8) & 0xFF);
+                m[j] = max(ca[j], cb[j]);
             }
         for (int y = 0; y < h; y++)
             for (int x = 0; x < bw; x++) {
@@ -125,15 +146,18 @@ static void PaintFocusColumn(HDC dst, const RECT& rc, int focusCol) {
                 for (int k = max(0, x - R); k <= min(bw - 1, x + R); k++) v = max(v, m[(size_t)y * bw + k]);
                 tmp[(size_t)y * bw + x] = v;
             }
-        const int fg[3] = { GetBValue(kFocusText), GetGValue(kFocusText), GetRValue(kFocusText) };
+        const COLORREF second = focusCol >= 0 ? kFocusText : RGB(255, 255, 255);
+        const int fa[3] = { GetBValue(kFocusText), GetGValue(kFocusText), GetRValue(kFocusText) };
+        const int fb[3] = { GetBValue(second), GetGValue(second), GetRValue(second) };
         for (int y = 0; y < h; y++)
             for (int x = 0; x < bw; x++) {
                 bool halo = false;
                 for (int k = max(0, y - R); k <= min(h - 1, y + R) && !halo; k++) halo = tmp[(size_t)k * bw + x] != 0;
                 if (!halo) continue;
-                const int g = m[(size_t)y * bw + x];
+                const size_t j = (size_t)y * bw + x;
+                const int a1 = ca[j], b1 = cb[j];
                 DWORD v = 0;
-                for (int c = 0; c < 3; c++) v |= (DWORD)(fg[c] * g / 255) << (c * 8);
+                for (int c = 0; c < 3; c++) v |= (DWORD)min(255, (fa[c] * a1 + fb[c] * b1) / 255) << (c * 8);
                 out[(size_t)y * w + x0 + x] = v;
             }
     }
@@ -170,7 +194,8 @@ static LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (!g_light) g_light = CreateSolidBrush(RGB(35, 35, 50));
 
         int filterCol = (g_currentHint.size() == 1) ? g_currentHint[0] - 'A' : -1;
-        const bool focus = filterCol >= 0 && filterCol < N && g_snapBits && g_snapW == db.Width() && g_snapH == db.Height();
+        if (filterCol >= N) filterCol = -1;
+        const bool focus = g_snapBits && g_snapW == db.Width() && g_snapH == db.Height();
         SetLayeredWindowAttributes(hwnd, 0, focus ? 255 : kWndAlpha, LWA_ALPHA);
         if (focus) {
             PaintFocusColumn(db.mem, db.rc, filterCol);
@@ -206,6 +231,7 @@ static LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         return 0;
     case WM_DESTROY:
         FreeSnapshot();
+        if (g_maskFont) { DeleteObject(g_maskFont); g_maskFont = NULL; }
         if (g_font)  { DeleteObject(g_font);  g_font = NULL; }
         if (g_dark)  { DeleteObject(g_dark);  g_dark = NULL; }
         if (g_light) { DeleteObject(g_light); g_light = NULL; }
