@@ -4,6 +4,7 @@
 #include "Screens.h"
 #include "Grid.h"
 #include "Indicator.h"
+#include "KeyOsd.h"
 
 static const int N = 26;
 static HFONT  g_font = NULL;
@@ -63,6 +64,7 @@ static LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         POINT p = HintCellCenter(sr, max(0, min(N - 1, c)), max(0, min(N - 1, r)));
         SetCursorPos(p.x, p.y);
         ExitHintMode(false);
+        KeyOsd_CursorPulse(true, 200);
         return 0;
     }
     case WM_RBUTTONDOWN:
@@ -117,4 +119,5 @@ void HintTypeLetter(char letter) {
     POINT p = HintCellCenter(sr, g_currentHint[0] - 'A', g_currentHint[1] - 'A');
     SetCursorPos(p.x, p.y);
     ExitHintMode(true);
+    KeyOsd_CursorPulse(true, 200);   // 选中格子：光标处放一次短脉冲（200ms）
 }

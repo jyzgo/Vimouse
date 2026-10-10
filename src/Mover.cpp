@@ -47,6 +47,14 @@ static void MoveThread() {
                 const int slack = 2;
                 bool inside = cur.x >= min(prev.x, target.x) - slack && cur.x <= max(prev.x, target.x) + slack &&
                               cur.y >= min(prev.y, target.y) - slack && cur.y <= max(prev.y, target.y) + slack;
+                if (!inside && MonitorFromPoint(cur, MONITOR_DEFAULTTONULL) != MonitorFromPoint(prev, MONITOR_DEFAULTTONULL)) {
+                    // hjkl 推过屏幕边界：Windows「在显示器之间平滑移动光标」会按两屏尺寸比例改写另一个轴
+                    // （1440 高 → 1152 高时 y 会跳）。只要行进轴上的落点仍合法，就是正常跨屏，不当成别人挪了光标；
+                    // Deskflow 把光标拉回屏幕中心时两个轴都会偏离，仍能检测到
+                    bool xOk = cur.x >= min(prev.x, target.x) - slack && cur.x <= max(prev.x, target.x) + slack;
+                    bool yOk = cur.y >= min(prev.y, target.y) - slack && cur.y <= max(prev.y, target.y) + slack;
+                    if ((target.x != prev.x && xOk) || (target.y != prev.y && yOk)) inside = true;
+                }
                 if (!inside) {
                     g_moveKeys = 0;
                     g_mouseSpeed = g_lastSetSpeed;

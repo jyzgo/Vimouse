@@ -255,10 +255,10 @@ HWND  g_pulse = NULL;
 DWORD g_pulseStart = 0;
 bool  g_pulseOn = true;
 const int   kPulseSize = 96;      // 窗口边长（以光标为中心）
-const DWORD kPulseMs = 450;
+DWORD g_pulseMs = 450;            // 本次脉冲时长：启动/切屏 450ms，Hint 选中 200ms
 
 void RenderPulse() {
-    float t = min(1.0f, (GetTickCount() - g_pulseStart) / (float)kPulseMs);
+    float t = min(1.0f, (GetTickCount() - g_pulseStart) / (float)g_pulseMs);
     float ease = 1.0f - (1.0f - t) * (1.0f - t);
     float R = 44.0f - 32.0f * ease;               // 圆环从 44px 收到 12px
     float fade = t < 0.6f ? 1.0f : (1.0f - t) / 0.4f;
@@ -305,7 +305,7 @@ void RenderPulse() {
 
 LRESULT CALLBACK PulseWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_TIMER && wParam == TIMER_PULSE) {
-        if (GetTickCount() - g_pulseStart >= kPulseMs) { KillTimer(hwnd, TIMER_PULSE); ShowWindow(hwnd, SW_HIDE); }
+        if (GetTickCount() - g_pulseStart >= g_pulseMs) { KillTimer(hwnd, TIMER_PULSE); ShowWindow(hwnd, SW_HIDE); }
         else RenderPulse();
         return 0;
     }
@@ -314,7 +314,7 @@ LRESULT CALLBACK PulseWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 }  // namespace
 
-void KeyOsd_CursorPulse(bool on) {
+void KeyOsd_CursorPulse(bool on, unsigned int ms) {
     if (!g_pulse) {
         WNDCLASSEXW wc = { sizeof(wc) };
         wc.lpfnWndProc = PulseWndProc;
@@ -326,6 +326,7 @@ void KeyOsd_CursorPulse(bool on) {
         if (!g_pulse) return;
     }
     g_pulseOn = on;
+    g_pulseMs = ms;
     g_pulseStart = GetTickCount();
     RenderPulse();
     SetTimer(g_pulse, TIMER_PULSE, 16, NULL);

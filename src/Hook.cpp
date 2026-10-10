@@ -207,12 +207,14 @@ bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
     if (IsAction(Action::Hint, (WORD)vk, m)) { EnterHintMode(); g_lastActionWasC = false; return true; }
     if (IsAction(Action::ClickMode, (WORD)vk, m)) { EnterClickMode(); g_lastActionWasC = false; return true; }
     if (IsAction(Action::ScreenCenter, (WORD)vk, m)) {
-        if (g_lastActionWasC) g_currentScreenIndex = (g_currentScreenIndex + 1) % (int)g_screenRects.size();   // 连按：切屏
+        const bool switching = g_lastActionWasC;
+        if (switching) g_currentScreenIndex = (g_currentScreenIndex + 1) % (int)g_screenRects.size();   // 连按：切屏
         else g_currentScreenIndex = GetCurrentScreenIndex();
         POINT c = RectCenter(ScreenRectAt(g_currentScreenIndex));
         SetCursorPos(c.x, c.y);
         g_lastActionWasC = true;
         UpdateIndicatorPosition();
+        if (switching) KeyOsd_CursorPulse(true);   // 切到另一块屏：在新位置放一次跟开启时一样的脉冲，方便找到光标
         return true;
     }
     if (IsAction(Action::TagPut, (WORD)vk, m)) { POINT p; GetCursorPos(&p); PutTag(p); return true; }
