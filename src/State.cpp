@@ -20,8 +20,8 @@ std::atomic<unsigned> g_moveKeys{ 0 };
 std::atomic<bool>     g_shouldMove{ false };
 int g_mouseSpeed = 10;
 int g_lastSetSpeed = 10;
-int g_acceleratedSpeed = 10;
-int g_maxSpeed = 2000;
+int g_acceleratedSpeed = 20;   // 按住时每 ~5ms 速度增量（原 10，加速度翻倍）
+int g_maxSpeed = 4500;         // 封顶速度（原 2000 → 3000 → 4500，两次各提升 50%）
 int g_wheelSpeed = 300;
 
 bool  g_leftButtonDown = false;

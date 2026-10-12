@@ -435,7 +435,7 @@ bool SameSig(const std::vector<WinSig>& a, const std::vector<WinSig>& b) {
 void Render();
 void Redraw() { Render(); }
 
-// ---- Hint 同款坐标：屏幕 26×26 格，标签 = 列字母 + 行字母 ----
+// ---- Hint 同款坐标：屏幕 26×26 格，标签 = 行字母 + 列字母 ----
 constexpr int kGrid = 26;
 
 long long Dist2(POINT a, POINT b) { long long dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; }
@@ -447,30 +447,30 @@ void CellOf(POINT p, int& col, int& row) {
     row = max(0, min(kGrid - 1, (int)((long long)(p.y - g_area.top) * kGrid / h)));
 }
 
-std::string CellLabel(int col, int row) { return std::string{ (char)('A' + col), (char)('A' + row) }; }
+std::string CellLabel(int col, int row) { return std::string{ (char)('A' + row), (char)('A' + col) }; }
 
-// 坐标第一个字母（列）不能用本模式的命令键：移动 hjkl、左/右键 f/g、关闭 d —— 否则按 h 分不清是"往左跳"还是"输坐标"。
-// 第二个字母（行）已经在输坐标的状态里，26 个随便用，跟 Hint 完全一致。
-bool g_colBanned[kGrid] = {};
+// 坐标第一个字母（行）不能用本模式的命令键：移动 hjkl、左/右键 f/g、关闭 d —— 否则按 h 分不清是"往左跳"还是"输坐标"。
+// 第二个字母（列）已经在输坐标的状态里，26 个随便用，跟 Hint 完全一致。
+bool g_rowBanned[kGrid] = {};
 
-void BuildColumnBans() {
-    for (bool& b : g_colBanned) b = false;
+void BuildRowBans() {
+    for (bool& b : g_rowBanned) b = false;
     for (Action a : { Action::MoveLeft, Action::MoveDown, Action::MoveUp, Action::MoveRight,
                       Action::ClickLeft, Action::ClickRight, Action::ClickMode }) {
         const KeyChord& k = g_keymap[(int)a];
-        if (!k.ctrl && !k.alt && k.vk >= 'A' && k.vk <= 'Z') g_colBanned[k.vk - 'A'] = true;
+        if (!k.ctrl && !k.alt && k.vk >= 'A' && k.vk <= 'Z') g_rowBanned[k.vk - 'A'] = true;
     }
 }
 
-bool IsCommandLetter(char ch) { return ch >= 'A' && ch <= 'Z' && g_colBanned[ch - 'A']; }
+bool IsCommandLetter(char ch) { return ch >= 'A' && ch <= 'Z' && g_rowBanned[ch - 'A']; }
 
 // 每个框标上它中心所在的 Hint 格坐标 —— 跟 Hint 模式里同一位置敲的字母一样，形成肌肉记忆。
-// 列落在命令键字母上、或同格已被占：挪到离框中心最近的可用格（列换成相邻的可用字母，行尽量不变）。
+// 行落在命令键字母上、或同格已被占：挪到离框中心最近的可用格（行换成相邻的可用字母，列尽量不变）。
 // 可用格用完的丢掉离光标最远的
 std::vector<Target> BuildTargets(std::vector<RECT> rects) {
-    int freeCols = 0;
-    for (bool b : g_colBanned) if (!b) freeCols++;
-    const size_t cap = (size_t)freeCols * kGrid;
+    int freeRows = 0;
+    for (bool b : g_rowBanned) if (!b) freeRows++;
+    const size_t cap = (size_t)freeRows * kGrid;
     if (rects.size() > cap) {
         POINT p; GetCursorPos(&p);
         std::nth_element(rects.begin(), rects.begin() + cap, rects.end(),
@@ -487,7 +487,7 @@ std::vector<Target> BuildTargets(std::vector<RECT> rects) {
     }
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.d < b.d; });
     bool used[kGrid][kGrid] = {};
-    for (int c = 0; c < kGrid; c++) if (g_colBanned[c]) for (int r = 0; r < kGrid; r++) used[c][r] = true;
+    for (int r = 0; r < kGrid; r++) if (g_rowBanned[r]) for (int c = 0; c < kGrid; c++) used[c][r] = true;
     std::vector<Target> out;
     for (const Item& it : items) {
         int col = it.col, row = it.row;
@@ -570,7 +570,7 @@ int FindInDirection(unsigned bit) {
     return best;
 }
 
-// 跟 Hint 一样两字母一组：第一个是列，第二个是行。
+// 跟 Hint 一样两字母一组：第一个是行，第二个是列。
 // 正好有框标着这个坐标就选它；没有（那格是空的）就选离那格中心最近的框 —— 照 Hint 习惯敲也能落到附近的按钮。
 // 选中后停在本模式：接着可以 hjkl 微调、f 点击，或者再敲一组坐标
 void TypeLetter(char ch) {
@@ -582,7 +582,7 @@ void TypeLetter(char ch) {
     for (int i = 0; i < (int)g_targets.size() && pick < 0; i++)
         if (g_targets[i].label == want) pick = i;
     if (pick < 0) {
-        POINT cc = HintCellCenter(g_area, want[0] - 'A', want[1] - 'A');
+        POINT cc = HintCellCenter(g_area, want[1] - 'A', want[0] - 'A');   // [0]=行 [1]=列
         long long best = -1;
         for (int i = 0; i < (int)g_targets.size(); i++) {
             long long d = Dist2(Center(g_targets[i].rc), cc);
@@ -841,7 +841,7 @@ void EnterClickMode() {
     if (!g_wnd) return;
     if (g_clickMode) { ExitClickMode(); return; }   // 再按一次 = 关闭（开关）
     g_clickMode = true;
-    BuildColumnBans();
+    BuildRowBans();
     RefreshScreens();
     g_area = ScreenRectAt(GetCurrentScreenIndex());
     KillTimer(g_wnd, kExitTimer);
@@ -883,7 +883,7 @@ void ExitClickMode() {
 int ClickModeStatus() { return g_scanning ? -1 : (int)g_targets.size(); }
 
 bool HandleClickKeyDown(DWORD vk, Modifiers m) {
-    if (vk == VK_ESCAPE) {
+    if (vk == VK_BACK) {   // 已输了第一个字母：清掉重输；否则回到鼠标模式（Esc 统一退出 Vimouse）
         if (!g_prefix.empty()) { g_prefix.clear(); Redraw(); }
         else ExitClickMode();
         return true;
@@ -898,7 +898,6 @@ bool HandleClickKeyDown(DWORD vk, Modifiers m) {
     if (IsAction(Action::ClickLeft, (WORD)vk, m))  { DoClick(Button::Left); return true; }
     if (IsAction(Action::ClickRight, (WORD)vk, m)) { DoClick(Button::Right); return true; }
     if (g_scanning) return true;
-    if (vk == VK_BACK) { g_prefix.clear(); Redraw(); return true; }
     unsigned bit = (vk == VK_LEFT) ? MV_LEFT : (vk == VK_RIGHT) ? MV_RIGHT : (vk == VK_UP) ? MV_UP : (vk == VK_DOWN) ? MV_DOWN : 0;
     if (!bit) {
         unsigned mb = MoveBitOf((WORD)vk, m) & (MV_LEFT | MV_DOWN | MV_UP | MV_RIGHT);
@@ -923,7 +922,7 @@ bool HandleClickKeyDown(DWORD vk, Modifiers m) {
         }
         return true;
     }
-    // 坐标第一个字母：命令键（hjkl/f/g/d）以外的 A-Z
+    // 坐标第一个字母（行）：命令键（hjkl/f/g/d）以外的 A-Z
     if (vk >= 'A' && vk <= 'Z' && !m.ctrl && !m.alt && !IsCommandLetter((char)vk)) {
         TypeLetter((char)vk);
         return true;

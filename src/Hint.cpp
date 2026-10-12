@@ -34,14 +34,15 @@ static LRESULT CALLBACK HintWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (!g_light) g_light = CreateSolidBrush(RGB(35, 35, 50));
 
         HGDIOBJ old = SelectObject(db.mem, g_font);
-        int filterCol = (g_currentHint.size() == 1) ? g_currentHint[0] - 'A' : -1;
+        // 坐标 = 行字母 + 列字母：第一个字母选行（横着一条），第二个字母选这一行里的第几格
+        int filterRow = (g_currentHint.size() == 1) ? g_currentHint[0] - 'A' : -1;
         for (int row = 0; row < N; row++) {
             for (int col = 0; col < N; col++) {
                 RECT cell = HintCellRect(db.rc, col, row);
                 FillRect(db.mem, &cell, ((row + col) & 1) ? g_light : g_dark);
-                if (filterCol >= 0 && col != filterCol) continue;
-                // 只改字色：列号（第一个字母）黄色，行号（第二个字母）白色
-                char s[2] = { (char)('A' + col), (char)('A' + row) };
+                if (filterRow >= 0 && row != filterRow) continue;
+                // 只改字色：行号（第一个字母）黄色，列号（第二个字母）白色
+                char s[2] = { (char)('A' + row), (char)('A' + col) };
                 SIZE all, first;
                 GetTextExtentPoint32A(db.mem, s, 2, &all);
                 GetTextExtentPoint32A(db.mem, s, 1, &first);
@@ -107,6 +108,13 @@ void ExitHintMode(bool showMiniGrid) {
     if (showMiniGrid) EnterMiniGrid();
 }
 
+bool HintClearTyped() {
+    if (!g_hintMode || g_currentHint.empty()) return false;
+    g_currentHint.clear();
+    InvalidateRect(g_hintWindow, NULL, TRUE);
+    return true;
+}
+
 void HintTypeLetter(char letter) {
     if (!g_hintMode) return;
     if (g_currentHint.empty()) {
@@ -116,7 +124,7 @@ void HintTypeLetter(char letter) {
     }
     g_currentHint += letter;
     RECT sr = ScreenRectAt(g_hintScreenIndex);
-    POINT p = HintCellCenter(sr, g_currentHint[0] - 'A', g_currentHint[1] - 'A');
+    POINT p = HintCellCenter(sr, g_currentHint[1] - 'A', g_currentHint[0] - 'A');   // [0]=行 [1]=列
     SetCursorPos(p.x, p.y);
     ExitHintMode(true);
     KeyOsd_CursorPulse(true, 200);   // 选中格子：光标处放一次短脉冲（200ms）

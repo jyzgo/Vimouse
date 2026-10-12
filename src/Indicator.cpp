@@ -8,15 +8,15 @@
 static HFONT  g_font = NULL;
 static HFONT  g_fontBig = NULL;
 
-// 光标所在 hint 格子的两字母坐标（列, 行）
+// 光标所在 hint 格子的两字母坐标（行, 列）—— 跟 Hint 模式里敲的顺序一致
 static void HintCoordAt(POINT p, char out[3]) {
     out[0] = '?'; out[1] = '?'; out[2] = 0;
     for (const RECT& sr : g_screenRects) {
         if (!PtInRect(&sr, p)) continue;
         int col = (p.x - sr.left) * 26 / RectW(sr);
         int row = (p.y - sr.top) * 26 / RectH(sr);
-        out[0] = (char)('A' + max(0, min(25, col)));
-        out[1] = (char)('A' + max(0, min(25, row)));
+        out[0] = (char)('A' + max(0, min(25, row)));
+        out[1] = (char)('A' + max(0, min(25, col)));
         return;
     }
 }

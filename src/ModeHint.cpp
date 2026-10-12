@@ -87,13 +87,14 @@ bool Build(Content& c) {
         add(K(Action::ClickLeft), Z(L"左键", L"Left click"));
         add(K(Action::ClickRight), Z(L"右键", L"Right click"));
         add(K(Action::DragToggle), Z(L"拖拽", L"Drag"));
+        add(K(Action::WheelMode), Z(L"在此处进滚轮模式", L"Scroll mode here"));
         add(L"Enter", Z(L"点击并退出", L"Click & exit"));
-        add(L"Esc", Z(L"退出 Grid", L"Exit grid"));
+        add(L"Backspace", Z(L"回到鼠标模式", L"Back to mouse"));
     } else if (g_hintMode) {
         c.title = Z(L"Hint 跳转", L"Hint jump");
         c.accent = RGB(255, 210, 80);
         add(L"A-Z", Z(L"输入两个字母", L"Type 2 letters"));
-        add(L"Esc", Z(L"取消", L"Cancel"));
+        add(L"Backspace", Z(L"重输 / 回到鼠标模式", L"Retype / back to mouse"));
     } else if (g_clickMode) {
         int n = ClickModeStatus();
         c.title = Z(L"可点击元素", L"Clickables");
@@ -104,22 +105,22 @@ bool Build(Content& c) {
         add(mv + L" / \u2190\u2193\u2191\u2192", Z(L"跳到该方向最近的", L"Jump nearest that way"));
         add(K(Action::ClickLeft) + L"/Enter", Z(L"左键点击", L"Left click"));
         add(K(Action::ClickRight), Z(L"右键", L"Right click"));
-        add(L"Backspace", Z(L"清除已输字母", L"Clear typed"));
-        add(K(Action::ClickMode) + L"/Esc", Z(L"退出", L"Exit"));
+        add(L"Backspace", Z(L"重输 / 回到鼠标模式", L"Retype / back to mouse"));
+        add(K(Action::ClickMode), Z(L"回到鼠标模式", L"Back to mouse"));
     } else if (g_tagMode) {
         c.title = Z(L"标签跳转", L"Tag jump");
         c.accent = RGB(255, 160, 80);
         add(L"A-Z", Z(L"跳到该标签", L"Jump to tag"));
-        add(K(Action::TagJump) + L"/Esc", Z(L"退出", L"Exit"));
+        add(K(Action::TagJump), Z(L"回到鼠标模式", L"Back to mouse"));
     } else if (g_wheelMode) {
         c.title = Z(L"滚轮模式", L"Scroll mode");
         c.accent = RGB(170, 140, 255);
-        add(mv, Z(L"左/下/上/右滚", L"Scroll"));
+        add(mv, Z(L"滚动（按住加速，松开滑停）", L"Scroll (hold=accel, glides)"));
         add(K(Action::ClickLeft), Z(L"左键", L"Left click"));
         add(K(Action::ClickRight), Z(L"右键", L"Right click"));
         add(K(Action::DragToggle), Z(L"拖拽", L"Drag"));
         add(K(Action::Hint), Z(L"Hint 跳转", L"Hint jump"));
-        add(K(Action::WheelMode) + L"/Esc", Z(L"退出滚轮", L"Exit scroll"));
+        add(K(Action::WheelMode) + L"/Backspace", Z(L"回到鼠标模式", L"Back to mouse"));
         add(Z(L"其他键", L"Others"), Z(L"退出并照常输入", L"Exit & pass"));
     } else {
         c.title = Z(L"鼠标模式", L"Mouse mode");
@@ -135,12 +136,13 @@ bool Build(Content& c) {
         add(K(Action::Grid), Z(L"Grid 定位", L"Grid"));
         add(K(Action::ClickMode), Z(L"可点击元素", L"Clickables"));
         add(K(Action::WheelMode), Z(L"滚轮模式", L"Scroll mode"));
-        add(K(Action::ScreenCenter), Z(L"屏幕中心/切屏", L"Center/next screen"));
+        add(K(Action::ScreenCenter), Z(L"屏幕中心 / cc 下一屏", L"Center / cc next screen"));
+        add(K(Action::ScreenCenter) + L"+" + mv, Z(L"切到该方向的屏", L"Screen in that direction"));
         add(K(Action::TagPut) + L"/" + K(Action::TagJump), Z(L"放/跳标签", L"Put/jump tag"));
         add(K(Action::HistPrev) + L"/" + K(Action::HistNext), Z(L"上/下一个位置", L"Prev/next pos"));
         add(K(Action::JumpInputPointKey) + L"/" + K(Action::JumpInputPointNext), Z(L"输入点 倒退/前进(按住看)", L"Input pts back/fwd (hold)"));
         add(L"Enter", Z(L"点击并退出", L"Click & exit"));
-        add(L"Esc", Z(L"退出", L"Exit"));
+        add(L"Esc", Z(L"退出 Vimouse", L"Exit Vimouse"));
     }
 
     section(Z(L"切换模式", L"Switch mode"));

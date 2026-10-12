@@ -94,6 +94,7 @@
     <ClInclude Include="src\KeyOsd.h" />
     <ClInclude Include="src\Keymap.h" />
     <ClInclude Include="src\Mover.h" />
+    <ClInclude Include="src\Scroller.h" />
     <ClInclude Include="src\Overlay.h" />
     <ClInclude Include="src\PipeServer.h" />
     <ClInclude Include="src\Remote.h" />
@@ -122,6 +123,7 @@
     <ClCompile Include="src\Keymap.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\Mover.cpp" />
+    <ClCompile Include="src\Scroller.cpp" />
     <ClCompile Include="src\Overlay.cpp" />
     <ClCompile Include="src\PipeServer.cpp" />
     <ClCompile Include="src\Remote.cpp" />

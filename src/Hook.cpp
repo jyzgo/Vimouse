@@ -6,6 +6,7 @@
 #include "Remote.h"
 #include "Mover.h"
 #include "Input.h"
+#include "Scroller.h"
 #include "History.h"
 #include "PointPeek.h"
 #include "Tags.h"
@@ -16,6 +17,7 @@
 #include "KeyOsd.h"
 #include "Screens.h"
 #include "Util.h"
+#include <cmath>
 
 namespace {
 
@@ -60,6 +62,11 @@ bool IsModifierVk(DWORD vk) {
 
 bool Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
+void ExitWheelMode() {
+    g_wheelMode = false;
+    ScrollStopAll();
+}
+
 Modifiers CurrentMods() { return { Down(VK_CONTROL), Down(VK_MENU), Down(VK_SHIFT) }; }
 
 // 带 Ctrl/Alt 的组合键是否被 keymap 绑定（IsAction 要求 ctrl/alt 完全一致，所以 Alt+M 不会命中 m=Hint）
@@ -73,7 +80,7 @@ void ExitAllModes() {
     ExitHintMode(false);
     ExitGridMode();
     ExitClickMode();
-    g_wheelMode = false;
+    ExitWheelMode();
     ExitTagMode();
 }
 
@@ -92,7 +99,7 @@ void SetRemoteKeyLabel(DWORD vk) {
 // ---- 各模式下的按下处理。返回 true = 吞掉按键 ----
 
 bool HandleGridKeyDown(DWORD vk, Modifiers m) {
-    if (vk == VK_ESCAPE) { ExitGridMode(); return true; }
+    if (vk == VK_BACK) { ExitGridMode(); return true; }   // 回到鼠标模式（Esc 统一退出 Vimouse）
     // 方向键 ←↑→↓ 与移动键（h/j/k/l 等）等价：选对应半区
     unsigned arrowBit = (vk == VK_LEFT) ? MV_LEFT : (vk == VK_RIGHT) ? MV_RIGHT :
                         (vk == VK_UP) ? MV_UP : (vk == VK_DOWN) ? MV_DOWN : 0;
@@ -102,6 +109,13 @@ bool HandleGridKeyDown(DWORD vk, Modifiers m) {
         return true;
     }
     if (IsAction(Action::GridBack, (WORD)vk, m)) { GridBack(); return true; }
+    if (IsAction(Action::WheelMode, (WORD)vk, m)) {   // grid 中按 y：在当前位置直接进滚轮模式
+        ExitGridMode();
+        g_wheelMode = true;
+        g_lastActionWasC = false;
+        UpdateIndicatorPosition();
+        return true;
+    }
     if (IsAction(Action::Grid, (WORD)vk, m)) { ExitGridMode(); EnterGridMode(); return true; }   // grid 中再按：切到屏幕中心 grid
     if (IsAction(Action::ClickLeft, (WORD)vk, m)) {
         ExitGridMode();
@@ -123,23 +137,30 @@ bool HandleGridKeyDown(DWORD vk, Modifiers m) {
 }
 
 bool HandleHintKeyDown(DWORD vk, Modifiers m) {
-    if (vk == VK_ESCAPE) { ExitHintMode(false); return true; }
+    if (vk == VK_BACK) {   // 已输了第一个字母：清掉重输；否则回到鼠标模式
+        if (!HintClearTyped()) ExitHintMode(false);
+        return true;
+    }
     if (vk >= 'A' && vk <= 'Z' && !m.ctrl && !m.alt) { HintTypeLetter((char)vk); return true; }
     return !IsModifierVk(vk);   // 其他键全部吞掉
 }
 
 bool HandleWheelKeyDown(DWORD vk, Modifiers m) {
     if (unsigned bit = MoveBitOf((WORD)vk, m)) {
-        if (bit == MV_UP || bit == MV_DOWN || bit == MV_LEFT || bit == MV_RIGHT) { Scroll(bit); return true; }
+        if (bit == MV_UP || bit == MV_DOWN || bit == MV_LEFT || bit == MV_RIGHT) {
+            if (g_remoteMode) Scroll(bit);   // 远程仍按一次一格转发
+            else ScrollKeyDown(bit);         // 本地：平滑滚动线程负责，按住加速、松开滑行
+            return true;
+        }
     }
-    if (IsAction(Action::WheelMode, (WORD)vk, m)) { g_wheelMode = false; UpdateIndicatorPosition(); return true; }
-    if (IsAction(Action::Hint, (WORD)vk, m)) { g_wheelMode = false; EnterHintMode(); return true; }
+    if (IsAction(Action::WheelMode, (WORD)vk, m)) { ExitWheelMode(); UpdateIndicatorPosition(); return true; }
+    if (IsAction(Action::Hint, (WORD)vk, m)) { ExitWheelMode(); EnterHintMode(); return true; }
     if (IsAction(Action::ClickLeft, (WORD)vk, m)) { Click(Button::Left); TriggerClickFlash(true); AddMousePositionToStack(); return true; }
     if (IsAction(Action::ClickRight, (WORD)vk, m)) { Click(Button::Right); TriggerClickFlash(true); return true; }
     if (IsAction(Action::DragToggle, (WORD)vk, m)) { ToggleDrag(); return true; }
-    if (vk == VK_ESCAPE) { g_wheelMode = false; UpdateIndicatorPosition(); return true; }
+    if (vk == VK_BACK) { ExitWheelMode(); UpdateIndicatorPosition(); return true; }   // 回到鼠标模式
     // 其他键退出滚轮模式并放行给系统
-    g_wheelMode = false;
+    ExitWheelMode();
     UpdateIndicatorPosition();
     return false;
 }
@@ -147,7 +168,6 @@ bool HandleWheelKeyDown(DWORD vk, Modifiers m) {
 bool HandleTagJumpKeyDown(DWORD vk, Modifiers m) {
     if (m.ctrl || m.alt) return false;
     if (IsAction(Action::TagJump, (WORD)vk, m)) { ExitTagMode(); return true; }
-    if (vk == VK_ESCAPE) { ExitTagMode(); return true; }
     if (vk >= 'A' && vk <= 'Z') {
         if (!JumpToTag((char)vk)) ExitTagMode();
         return true;
@@ -168,12 +188,65 @@ static void StartPeek(WORD vk, bool older) {
     PointPeek_Show(pts, n);
 }
 
+// ---- c：单按回当前屏中心；双击 cc 切下一块屏；按住 c（或按 c 后 250ms 内）再按 h/j/k/l 切到那个方向的屏 ----
+static bool  s_cHeld = false;     // c 物理按住中（同时用来忽略 c 的自动重复）
+static DWORD s_cDownTick = 0;     // 最近一次按下 c 的时间
+static bool  s_cDirUsed = false;  // 这次按 c 期间已经用方向键切过屏
+constexpr DWORD kCDirWindowMs = 250;   // 松开 c 后多久内的方向键还算"c+方向"。居中后看一眼再移动通常 >250ms
+
+// 从当前屏往 bit 方向找最近的屏：中心连线在该方向上为正，主轴距离 + 2×侧向偏移 最小者
+static int ScreenInDirection(int from, unsigned bit) {
+    int dx = 0, dy = 0;
+    if (bit & (MV_LEFT | MV_UPLEFT | MV_DOWNLEFT))    dx = -1;
+    if (bit & (MV_RIGHT | MV_UPRIGHT | MV_DOWNRIGHT)) dx = 1;
+    if (bit & (MV_UP | MV_UPLEFT | MV_UPRIGHT))       dy = -1;
+    if (bit & (MV_DOWN | MV_DOWNLEFT | MV_DOWNRIGHT)) dy = 1;
+    if (!dx && !dy) return -1;
+    const POINT c0 = RectCenter(ScreenRectAt(from));
+    int best = -1;
+    double bestScore = 0;
+    for (int i = 0; i < (int)g_screenRects.size(); i++) {
+        if (i == from) continue;
+        const POINT c = RectCenter(g_screenRects[i]);
+        const double vx = c.x - c0.x, vy = c.y - c0.y;
+        const double len = (dx && dy) ? 1.41421356 : 1.0;
+        const double along = (vx * dx + vy * dy) / len;
+        if (along <= 0) continue;
+        const double cross = std::fabs(vx * dy - vy * dx) / len;
+        const double score = along + 2 * cross;
+        if (best < 0 || score < bestScore) { best = i; bestScore = score; }
+    }
+    return best;
+}
+
+// c+方向：切到那个方向的屏中心。那个方向没有屏就留在原地（光标放一次脉冲提示）
+static void SwitchScreenToward(unsigned bit) {
+    const int from = GetCurrentScreenIndex();
+    const int to = ScreenInDirection(from, bit);
+    if (to >= 0) {
+        g_currentScreenIndex = to;
+        POINT c = RectCenter(ScreenRectAt(to));
+        SetCursorPos(c.x, c.y);
+    }
+    g_lastActionWasC = false;   // 切完不再接 cc
+    s_cDirUsed = true;
+    UpdateIndicatorPosition();
+    KeyOsd_CursorPulse(true);
+}
+
 bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
     if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return false;
 
     SetRemoteKeyLabel(vk);
 
     if (unsigned bit = MoveBitOf((WORD)vk, m)) {
+        // 按住 c 时、或刚按完 c 的 250ms 内：方向键 = 往那个方向切屏，不移动
+        if (!m.shift && (s_cHeld || (s_cDownTick && GetTickCount() - s_cDownTick <= kCDirWindowMs))) {
+            if (!s_cHeld) s_cDownTick = 0;   // c 已松开：只接这一下，后面的方向键照常移动
+            SwitchScreenToward(bit);
+            return true;
+        }
+        s_cDownTick = 0;
         g_moveKeys |= bit;
         g_lastActionWasC = false;
         StartSmoothMove();
@@ -207,9 +280,13 @@ bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
     if (IsAction(Action::Hint, (WORD)vk, m)) { EnterHintMode(); g_lastActionWasC = false; return true; }
     if (IsAction(Action::ClickMode, (WORD)vk, m)) { EnterClickMode(); g_lastActionWasC = false; return true; }
     if (IsAction(Action::ScreenCenter, (WORD)vk, m)) {
+        if (s_cHeld) return true;   // 按住 c 的自动重复：忽略（以前按住会不停切屏）
+        s_cHeld = true;
+        s_cDirUsed = false;
         // 单按 c：回到当前屏中心；600ms 内双击 cc：切到下一块屏。切屏后重新计数，下一次还得双击。
         static DWORD s_lastCTick = 0;
         const DWORD now = GetTickCount();
+        s_cDownTick = now;
         const bool switching = g_lastActionWasC && now - s_lastCTick <= 600;
         if (switching) g_currentScreenIndex = (g_currentScreenIndex + 1) % (int)g_screenRects.size();   // 双击：切屏
         else g_currentScreenIndex = GetCurrentScreenIndex();
@@ -261,8 +338,14 @@ bool HandleKeyUp(DWORD vk) {
         return true;
     }
     if (unsigned bits = MoveBitOfVk((WORD)vk)) {
+        ScrollKeyUp(bits);
         g_moveKeys &= ~bits;
         if (g_moveKeys == 0) StopSmoothMove();
+        return true;
+    }
+    if (s_cHeld && (WORD)vk == g_keymap[(int)Action::ScreenCenter].vk) {
+        s_cHeld = false;
+        if (s_cDirUsed) s_cDownTick = 0;   // 按住 c 时已经切过屏：松开后不再留 250ms 窗口
         return true;
     }
     if ((WORD)vk == g_keymap[(int)Action::ClickLeft].vk && g_leftButtonDown) {
@@ -341,16 +424,16 @@ LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 swallow = true;
             }
         }
+        else if (vk == VK_ESCAPE) {
+            // Esc 在任何模式（鼠标/Grid/Hint/可点击/标签/滚轮）下都直接退出 Vimouse；
+            // 子模式回鼠标模式用 Backspace 或该模式自己的开关键
+            SetActive(false);
+            swallow = true;
+        }
         else if (g_gridMode)      swallow = HandleGridKeyDown(vk, m);
         else if (g_hintMode)      swallow = HandleHintKeyDown(vk, m);
         else if (g_clickMode)     swallow = HandleClickKeyDown(vk, m);
         else if (g_tagMode && HandleTagJumpKeyDown(vk, m)) swallow = true;
-        else if (vk == VK_ESCAPE) {
-            if (g_wheelMode) { g_wheelMode = false; UpdateIndicatorPosition(); }
-            else if (g_tagMode) ExitTagMode();
-            else SetActive(false);
-            swallow = true;
-        }
         else if (g_wheelMode)     swallow = HandleWheelKeyDown(vk, m);
         else                      swallow = HandleNormalKeyDown(vk, m);
     } else if (isUp) {
@@ -383,7 +466,7 @@ void SetActive(bool active) {
         g_currentScreenIndex = GetCurrentScreenIndex();
         g_lastActionWasC = false;
         g_leftButtonDown = false;
-        g_wheelMode = false;
+        ExitWheelMode();
     } else {
         ReleaseHeldButtons();
         StopSmoothMove();
