@@ -65,15 +65,16 @@ static void MoveThread() {
             int dx = 0, dy = 0;
 
             if (g_shiftPressed) {
-                // 精确模式：每帧 1 像素，不加速
-                if (keys & MV_LEFT)  dx -= 1;
-                if (keys & MV_RIGHT) dx += 1;
-                if (keys & MV_UP)    dy -= 1;
-                if (keys & MV_DOWN)  dy += 1;
-                if (keys & MV_UPLEFT)    { dx -= 1; dy -= 1; }
-                if (keys & MV_UPRIGHT)   { dx += 1; dy -= 1; }
-                if (keys & MV_DOWNLEFT)  { dx -= 1; dy += 1; }
-                if (keys & MV_DOWNRIGHT) { dx += 1; dy += 1; }
+                // 精确模式：每帧固定像素（默认 1），不加速
+                const int p = g_settings.movePrecise;
+                if (keys & MV_LEFT)  dx -= p;
+                if (keys & MV_RIGHT) dx += p;
+                if (keys & MV_UP)    dy -= p;
+                if (keys & MV_DOWN)  dy += p;
+                if (keys & MV_UPLEFT)    { dx -= p; dy -= p; }
+                if (keys & MV_UPRIGHT)   { dx += p; dy -= p; }
+                if (keys & MV_DOWNLEFT)  { dx -= p; dy += p; }
+                if (keys & MV_DOWNRIGHT) { dx += p; dy += p; }
             } else {
                 if (GetTickCount() - lastAccel > 5) {
                     g_mouseSpeed = min(g_mouseSpeed + g_acceleratedSpeed, g_maxSpeed);

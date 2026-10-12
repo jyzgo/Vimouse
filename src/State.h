@@ -31,6 +31,20 @@ struct Settings {
     bool customCursor = true;   // 激活时使用十字准星光标
     bool modeHint     = true;   // 屏幕右侧显示当前模式可用按键
     bool inputMove    = false;  // hjkl 移动走 SendInput（Deskflow 等 KVM 主控端能看到，推到屏幕边缘可切屏）
+    int  language     = 0;      // 界面语言：0 跟随系统 / 1 中文 / 2 English（ini: language=auto|zh|en）
+
+    // ---- 速度（设置里的「速度」页；范围与 ini 键名见 Config.cpp 的 kSpeedParams）----
+    // 鼠标移动：每帧(10ms) 走 speed/10 像素
+    int moveStart     = 10;     // 按下移动键时的起始速度
+    int moveAccel     = 20;     // 按住时每帧速度增量
+    int moveMax       = 4500;   // 封顶速度
+    int moveHintStart = 15;     // Hint 定位之后微调的起始速度
+    int movePrecise   = 1;      // Shift+移动 每帧像素
+    // 滚轮模式：单位 wheel delta/秒（120 = 一格 ≈ 3 行）
+    int scrollStart    = 2600;  // 按下瞬间的速度
+    int scrollMax      = 20000; // 封顶速度
+    int scrollRamp     = 15000; // 按住时目标速度每秒增加多少
+    int scrollFriction = 9;     // 松开后的衰减（1/秒），越大滑得越短
 };
 
 // 主窗口自定义消息

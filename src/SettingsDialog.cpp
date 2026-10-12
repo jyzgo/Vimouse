@@ -16,21 +16,26 @@ namespace {
 enum Ctl : int {
     ID_TAB = 2000,
     // 常规
-    ID_AUTOSTART = 2100, ID_KEYOSD, ID_CUSTOMCURSOR, ID_MODEHINT, ID_INPUTMOVE,
+    ID_AUTOSTART = 2100, ID_KEYOSD, ID_CUSTOMCURSOR, ID_MODEHINT, ID_INPUTMOVE, ID_LANG,
     // 快捷键
     ID_KEYLIST = 2200, ID_KEYCAPTURE, ID_KEYRESET_ONE, ID_KEYRESET_ALL, ID_KEYHINT,
     // 远程
     ID_HOSTLIST = 2300, ID_HOSTEDIT, ID_PATHEDIT, ID_HOSTADD, ID_HOSTDEL, ID_HOSTLBL1, ID_HOSTLBL2, ID_HOSTLBL3,
+    // 速度（每个参数一个输入框：ID_SPEED_EDIT0 + 序号）
+    ID_SPEED_RESET = 2400, ID_SPEED_EDIT0 = 2410,
     // 底部
     ID_SAVE = IDOK, ID_CANCEL = IDCANCEL,
 };
 
+constexpr int kPages = 4, kMaxPerPage = 40;
+
 HWND g_dlg = NULL;
 HWND g_tab = NULL;
-HWND g_autoStart, g_keyOsd, g_customCursor, g_modeHint, g_inputMove;
+HWND g_autoStart, g_keyOsd, g_customCursor, g_modeHint, g_inputMove, g_lang;
 HWND g_keyList, g_keyCapture, g_keyResetOne, g_keyResetAll, g_keyHint;
 HWND g_hostList, g_hostEdit, g_pathEdit, g_hostAdd, g_hostDel, g_hostLbl1, g_hostLbl2, g_hostLbl3;
-HWND g_pages[3][12]; int g_pageCount[3] = { 0, 0, 0 };
+HWND g_speedEdits[16];
+HWND g_pages[kPages][kMaxPerPage]; int g_pageCount[kPages] = {};
 
 KeyChord g_editMap[(int)Action::Count];
 std::vector<RemoteHostInfo> g_editHosts;
@@ -41,7 +46,7 @@ bool g_zh = false;
 
 const wchar_t* T(const wchar_t* zh, const wchar_t* en) { return g_zh ? zh : en; }
 
-void Track(int page, HWND h) { if (g_pageCount[page] < 12) g_pages[page][g_pageCount[page]++] = h; }
+void Track(int page, HWND h) { if (g_pageCount[page] < kMaxPerPage) g_pages[page][g_pageCount[page]++] = h; }
 
 HWND Make(int page, const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id) {
     HWND hw = CreateWindowExW(0, cls, text, WS_CHILD | style, x, y, w, h, g_dlg, (HMENU)(INT_PTR)id, GetModuleHandle(NULL), NULL);
@@ -51,7 +56,7 @@ HWND Make(int page, const wchar_t* cls, const wchar_t* text, DWORD style, int x,
 }
 
 void ShowPage(int page) {
-    for (int p = 0; p < 3; p++)
+    for (int p = 0; p < kPages; p++)
         for (int i = 0; i < g_pageCount[p]; i++) ShowWindow(g_pages[p][i], p == page ? SW_SHOW : SW_HIDE);
 }
 
@@ -144,6 +149,14 @@ void BuildGeneral() {
     g_customCursor = Make(0, L"BUTTON", T(L"激活时使用十字准星光标", L"Use crosshair cursor while active"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 380, 24, ID_CUSTOMCURSOR); y += 32;
     g_modeHint = Make(0, L"BUTTON", T(L"屏幕右侧显示当前模式的按键提示框", L"Show current-mode key hints on the right side"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 400, 24, ID_MODEHINT); y += 32;
     g_inputMove = Make(0, L"BUTTON", T(L"移动时模拟鼠标输入（Deskflow 主控端推到屏幕边缘可切屏）", L"Move via simulated mouse input (lets Deskflow server switch screens at the edge)"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 420, 24, ID_INPUTMOVE); y += 40;
+    Make(0, L"STATIC", T(L"界面语言:", L"Language:"), WS_VISIBLE, x, y + 3, 90, 20, 0);
+    g_lang = Make(0, L"COMBOBOX", L"", WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, x + 90, y, 150, 120, ID_LANG);
+    SendMessageW(g_lang, CB_ADDSTRING, 0, (LPARAM)T(L"跟随系统", L"Follow system"));
+    SendMessageW(g_lang, CB_ADDSTRING, 0, (LPARAM)L"中文");
+    SendMessageW(g_lang, CB_ADDSTRING, 0, (LPARAM)L"English");
+    SendMessage(g_lang, CB_SETCURSEL, g_settings.language, 0);
+    Make(0, L"STATIC", T(L"（设置窗口重新打开后切换）", L"(dialog switches when reopened)"), WS_VISIBLE, x + 248, y + 3, 180, 20, 0);
+    y += 36;
     Make(0, L"STATIC", T(L"配置目录: ", L"Config folder: "), WS_VISIBLE, x, y, 90, 20, 0);
     std::wstring dir = Utf8ToWide(GetConfigDir());
     Make(0, L"EDIT", dir.c_str(), WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL, x + 90, y - 2, 320, 22, 0);
@@ -191,6 +204,50 @@ void BuildRemote() {
     FillHostList();
 }
 
+void SetSpeedEdits(const Settings& s) {
+    for (int i = 0; i < kSpeedParamCount && i < 16; i++)
+        SetWindowTextW(g_speedEdits[i], std::to_wstring(s.*kSpeedParams[i].field).c_str());
+}
+
+void BuildSpeed() {
+    const int x = 20;
+    int y = 46;
+    const Settings defaults{};
+    for (int i = 0; i < kSpeedParamCount && i < 16; i++) {
+        const SpeedParam& p = kSpeedParams[i];
+        if (i == 0 || p.scroll != kSpeedParams[i - 1].scroll) {
+            if (i) y += 6;
+            Make(3, L"STATIC", p.scroll ? T(L"【滚轮模式】单位：wheel delta/秒，120 = 一格", L"[Scroll mode] unit: wheel delta/s, 120 = one notch")
+                                        : T(L"【鼠标移动】每 10ms 移动 速度/10 像素", L"[Mouse move] moves speed/10 px every 10 ms"),
+                 WS_VISIBLE, x, y, 420, 20, 0);
+            y += 24;
+        }
+        Make(3, L"STATIC", T(p.zh, p.en), WS_VISIBLE, x + 10, y + 3, 210, 20, 0);
+        g_speedEdits[i] = Make(3, L"EDIT", L"", WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_NUMBER | ES_AUTOHSCROLL, x + 225, y, 70, 22, ID_SPEED_EDIT0 + i);
+        std::wstring range = std::to_wstring(p.lo) + L"–" + std::to_wstring(p.hi) + T(L"，默认 ", L", def ") + std::to_wstring(defaults.*p.field);
+        Make(3, L"STATIC", range.c_str(), WS_VISIBLE, x + 302, y + 3, 125, 20, 0);
+        y += 28;
+    }
+    y += 6;
+    Make(3, L"BUTTON", T(L"全部恢复默认", L"Reset all"), WS_VISIBLE | WS_TABSTOP, x, y, 110, 26, ID_SPEED_RESET);
+    Make(3, L"STATIC", T(L"保存后立即生效", L"Applies immediately on Save"), WS_VISIBLE, x + 120, y + 5, 300, 20, 0);
+    SetSpeedEdits(g_settings);
+}
+
+// 读输入框，超出范围的夹到边界；空着的保持原值
+void ReadSpeedEdits() {
+    for (int i = 0; i < kSpeedParamCount && i < 16; i++) {
+        const SpeedParam& p = kSpeedParams[i];
+        wchar_t buf[32] = {};
+        GetWindowTextW(g_speedEdits[i], buf, 32);
+        if (!buf[0]) continue;
+        long long v = _wtoi64(buf);
+        if (v < p.lo) v = p.lo;
+        if (v > p.hi) v = p.hi;
+        g_settings.*p.field = (int)v;
+    }
+}
+
 void OnSave() {
     SetAutoStart(SendMessage(g_autoStart, BM_GETCHECK, 0, 0) == BST_CHECKED);
     g_settings.keyOsd = SendMessage(g_keyOsd, BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -198,7 +255,14 @@ void OnSave() {
     g_settings.customCursor = SendMessage(g_customCursor, BM_GETCHECK, 0, 0) == BST_CHECKED;
     g_settings.modeHint = SendMessage(g_modeHint, BM_GETCHECK, 0, 0) == BST_CHECKED;
     g_settings.inputMove = SendMessage(g_inputMove, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    {
+        int lang = (int)SendMessage(g_lang, CB_GETCURSEL, 0, 0);
+        g_settings.language = (lang >= 0 && lang <= 2) ? lang : 0;
+        SetUiLanguage(g_settings.language);
+    }
+    ReadSpeedEdits();
     SaveSettings();
+    ApplySpeedSettings();
 
     for (int i = 0; i < (int)Action::Count; i++) g_keymap[i] = g_editMap[i];
     SaveKeymap();
@@ -227,10 +291,12 @@ LRESULT CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         ti.pszText = (LPWSTR)T(L"常规", L"General");  TabCtrl_InsertItem(g_tab, 0, &ti);
         ti.pszText = (LPWSTR)T(L"快捷键", L"Keys");    TabCtrl_InsertItem(g_tab, 1, &ti);
         ti.pszText = (LPWSTR)T(L"远程", L"Remote");    TabCtrl_InsertItem(g_tab, 2, &ti);
+        ti.pszText = (LPWSTR)T(L"速度", L"Speed");     TabCtrl_InsertItem(g_tab, 3, &ti);
 
         BuildGeneral();
         BuildKeys();
         BuildRemote();
+        BuildSpeed();
         ShowPage(0);
 
         HWND ok = CreateWindowExW(0, L"BUTTON", T(L"保存", L"Save"), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 270, 445, 85, 28, hwnd, (HMENU)IDOK, GetModuleHandle(NULL), NULL);
@@ -292,6 +358,9 @@ LRESULT CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (sel != LB_ERR && sel < (int)g_editHosts.size()) { g_editHosts.erase(g_editHosts.begin() + sel); FillHostList(); }
             break;
         }
+        case ID_SPEED_RESET:
+            SetSpeedEdits(Settings{});
+            break;
         case IDOK:
             OnSave();
             DestroyWindow(hwnd);

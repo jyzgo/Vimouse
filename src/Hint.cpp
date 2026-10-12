@@ -103,7 +103,7 @@ void ExitHintMode(bool showMiniGrid) {
     g_hintMode = false;
     g_currentHint.clear();
     ShowWindow(g_hintWindow, SW_HIDE);
-    g_mouseSpeed = g_lastSetSpeed = 15;   // Hint 之后微调，起步速度略快
+    g_mouseSpeed = g_lastSetSpeed = g_settings.moveHintStart;   // Hint 之后微调，起步速度略快（设置「速度」页可调）
     UpdateIndicatorPosition();
     if (showMiniGrid) EnterMiniGrid();
 }

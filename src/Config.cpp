@@ -1,7 +1,9 @@
 #include "Config.h"
 #include "State.h"
+#include "Util.h"
 #include <windows.h>
 #include <shlobj.h>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 
@@ -50,12 +52,48 @@ static bool IniBool(const std::map<std::string, std::string>& kv, const char* ke
     return it->second == "1" || it->second == "true" || it->second == "yes";
 }
 
+const SpeedParam kSpeedParams[] = {
+    { "move_start",      L"起始速度",                 L"Start speed",                &Settings::moveStart,      1, 500,    false },
+    { "move_accel",      L"加速度（按住时每帧增量）", L"Acceleration (per frame)",   &Settings::moveAccel,      0, 500,    false },
+    { "move_max",        L"最高速度",                 L"Max speed",                  &Settings::moveMax,        10, 20000, false },
+    { "move_hint_start", L"Hint 定位后的起始速度",    L"Start speed after Hint",     &Settings::moveHintStart,  1, 500,    false },
+    { "move_precise",    L"Shift 精确移动（像素/帧）", L"Shift precise move (px/frame)", &Settings::movePrecise, 1, 50,  false },
+    { "scroll_start",    L"起始速度",                 L"Start speed",                &Settings::scrollStart,    120, 100000, true },
+    { "scroll_max",      L"最高速度",                 L"Max speed",                  &Settings::scrollMax,      120, 100000, true },
+    { "scroll_ramp",     L"加速度（每秒增加）",       L"Acceleration (per second)",  &Settings::scrollRamp,     0, 100000, true },
+    { "scroll_friction", L"松开后衰减（越大停得越快）", L"Glide friction (higher = stops sooner)", &Settings::scrollFriction, 1, 100, true },
+};
+const int kSpeedParamCount = (int)(sizeof(kSpeedParams) / sizeof(kSpeedParams[0]));
+
+void ApplySpeedSettings() {
+    g_mouseSpeed = g_lastSetSpeed = g_settings.moveStart;
+    g_acceleratedSpeed = g_settings.moveAccel;
+    g_maxSpeed = g_settings.moveMax;
+}
+
 void LoadSettings() {
     auto kv = ReadIni(ConfigFilePath("settings.ini"));
     g_settings.keyOsd = IniBool(kv, "key_osd", false);
     g_settings.customCursor = IniBool(kv, "custom_cursor", true);
     g_settings.modeHint = IniBool(kv, "mode_hint", true);
     g_settings.inputMove = IniBool(kv, "input_move", false);
+    {
+        auto it = kv.find("language");
+        std::string v = it == kv.end() ? "auto" : it->second;
+        g_settings.language = (v == "zh" || v == "1") ? 1 : (v == "en" || v == "2") ? 2 : 0;
+        SetUiLanguage(g_settings.language);
+    }
+    const Settings defaults{};
+    for (int i = 0; i < kSpeedParamCount; i++) {
+        const SpeedParam& p = kSpeedParams[i];
+        int v = defaults.*p.field;
+        auto it = kv.find(p.key);
+        if (it != kv.end() && !it->second.empty()) v = atoi(it->second.c_str());
+        if (v < p.lo) v = p.lo;
+        if (v > p.hi) v = p.hi;
+        g_settings.*p.field = v;
+    }
+    ApplySpeedSettings();
 }
 
 void SaveSettings() {
@@ -65,6 +103,9 @@ void SaveSettings() {
     f << "custom_cursor=" << (g_settings.customCursor ? 1 : 0) << "\n";
     f << "mode_hint=" << (g_settings.modeHint ? 1 : 0) << "\n";
     f << "input_move=" << (g_settings.inputMove ? 1 : 0) << "\n";
+    f << "# language: auto (follow system) | zh | en\n";
+    f << "language=" << (g_settings.language == 1 ? "zh" : g_settings.language == 2 ? "en" : "auto") << "\n";
+    for (int i = 0; i < kSpeedParamCount; i++) f << kSpeedParams[i].key << "=" << g_settings.*kSpeedParams[i].field << "\n";
 }
 
 void LoadRemoteHosts() {

@@ -20,11 +20,8 @@ std::atomic<unsigned> s_kick{ 0 };       // 新按下、滚动线程还没处理
 std::atomic<bool>     s_running{ false };
 
 // 速度单位：wheel delta / 秒（120 = 一格 ≈ 3 行）
-constexpr double kStartSpeed = 2600;   // 按下瞬间的速度：轻点一下 ≈ 3 格
-constexpr double kMaxSpeed   = 20000;  // 按住约 1.2s 后的封顶速度（≈ 旧版自动重复的 2 倍）
-constexpr double kRampPerSec = 15000;  // 按住时目标速度每秒增加多少
+// 起始/封顶/加速/衰减来自 g_settings（设置「速度」页可调，默认 2600 / 20000 / 15000 / 9）
 constexpr double kFollow     = 14;     // 速度追目标速度的快慢（1/秒）
-constexpr double kFriction   = 9;      // 松开后的衰减（1/秒）：越大滑得越短
 constexpr double kStopSpeed  = 40;     // 低于这个速度直接停
 constexpr int    kTickMs     = 8;
 
@@ -45,6 +42,10 @@ void Emit(bool horizontal, int delta) {
 // dir: +1 / -1 / 0（没按，或两个相反方向同时按）
 // 不做 Shift 慢速：用户按着 Shift 时注入的竖直滚轮，浏览器等会当成横向滚动
 void Step(Axis& a, int dir, bool kicked, double dt, bool horizontal) {
+    const double kStartSpeed = g_settings.scrollStart;
+    const double kMaxSpeed   = g_settings.scrollMax;
+    const double kRampPerSec = g_settings.scrollRamp;
+    const double kFriction   = g_settings.scrollFriction;
     if (dir) {
         const double base = kStartSpeed;
         const bool same = a.v * dir > 0;

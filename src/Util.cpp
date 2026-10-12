@@ -1,7 +1,13 @@
 #include "Util.h"
 #include <windows.h>
 
+static int g_uiLang = 0;
+
+void SetUiLanguage(int lang) { g_uiLang = lang; }
+
 bool IsSystemChinese() {
+    if (g_uiLang == 1) return true;
+    if (g_uiLang == 2) return false;
     return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
 }
 
