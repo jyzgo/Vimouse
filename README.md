@@ -55,7 +55,7 @@
 
 ### 设置窗口
 
-- **常规**：开机自启、按键提示、激活时是否使用十字准星光标、模式按键提示框（`settings.ini` 的 `mode_hint`）、界面语言（`language=auto|zh|en`，默认 `auto` 跟随系统）
+- **常规**：开机自启、启动后是否直接激活（`start_active`，关掉则开机后在托盘待机、按快捷键再激活）、按键提示、激活时是否使用十字准星光标、模式按键提示框（`settings.ini` 的 `mode_hint`）、界面语言（`language=auto|zh|en`，默认 `auto` 跟随系统）
 - **快捷键**：选一行 → 点「修改按键」→ 按下新键；有冲突会提示交换；可单项 / 全部恢复默认
 - **远程**：SSH 主机列表（`host|远端 Vimouse.exe 路径`）
 - **速度**：鼠标移动（起始速度 `move_start`、加速度 `move_accel`、最高速度 `move_max`、Hint 后起始速度 `move_hint_start`、Shift 精确移动像素 `move_precise`）和滚轮模式（起始 `scroll_start`、最高 `scroll_max`、加速度 `scroll_ramp`、松开衰减 `scroll_friction`）；每项旁边写着范围和默认值，可一键恢复默认，保存后立即生效

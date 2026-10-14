@@ -77,6 +77,7 @@ void LoadSettings() {
     g_settings.customCursor = IniBool(kv, "custom_cursor", true);
     g_settings.modeHint = IniBool(kv, "mode_hint", true);
     g_settings.inputMove = IniBool(kv, "input_move", false);
+    g_settings.startActive = IniBool(kv, "start_active", true);
     {
         auto it = kv.find("language");
         std::string v = it == kv.end() ? "auto" : it->second;
@@ -103,6 +104,7 @@ void SaveSettings() {
     f << "custom_cursor=" << (g_settings.customCursor ? 1 : 0) << "\n";
     f << "mode_hint=" << (g_settings.modeHint ? 1 : 0) << "\n";
     f << "input_move=" << (g_settings.inputMove ? 1 : 0) << "\n";
+    f << "start_active=" << (g_settings.startActive ? 1 : 0) << "\n";
     f << "# language: auto (follow system) | zh | en\n";
     f << "language=" << (g_settings.language == 1 ? "zh" : g_settings.language == 2 ? "en" : "auto") << "\n";
     for (int i = 0; i < kSpeedParamCount; i++) f << kSpeedParams[i].key << "=" << g_settings.*kSpeedParams[i].field << "\n";

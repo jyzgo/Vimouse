@@ -16,7 +16,7 @@ namespace {
 enum Ctl : int {
     ID_TAB = 2000,
     // 常规
-    ID_AUTOSTART = 2100, ID_KEYOSD, ID_CUSTOMCURSOR, ID_MODEHINT, ID_INPUTMOVE, ID_LANG,
+    ID_AUTOSTART = 2100, ID_KEYOSD, ID_CUSTOMCURSOR, ID_MODEHINT, ID_INPUTMOVE, ID_LANG, ID_STARTACTIVE,
     // 快捷键
     ID_KEYLIST = 2200, ID_KEYCAPTURE, ID_KEYRESET_ONE, ID_KEYRESET_ALL, ID_KEYHINT,
     // 远程
@@ -31,7 +31,7 @@ constexpr int kPages = 4, kMaxPerPage = 40;
 
 HWND g_dlg = NULL;
 HWND g_tab = NULL;
-HWND g_autoStart, g_keyOsd, g_customCursor, g_modeHint, g_inputMove, g_lang;
+HWND g_autoStart, g_startActive, g_keyOsd, g_customCursor, g_modeHint, g_inputMove, g_lang;
 HWND g_keyList, g_keyCapture, g_keyResetOne, g_keyResetAll, g_keyHint;
 HWND g_hostList, g_hostEdit, g_pathEdit, g_hostAdd, g_hostDel, g_hostLbl1, g_hostLbl2, g_hostLbl3;
 HWND g_speedEdits[16];
@@ -145,6 +145,7 @@ LRESULT CALLBACK CaptureBtnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 void BuildGeneral() {
     int x = 20, y = 50;
     g_autoStart = Make(0, L"BUTTON", T(L"开机自动启动", L"Run at startup"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 380, 24, ID_AUTOSTART); y += 32;
+    g_startActive = Make(0, L"BUTTON", T(L"启动后直接激活（不勾 = 启动后待机，按快捷键再激活）", L"Activate on launch (unchecked = stay idle until hotkey)"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 420, 24, ID_STARTACTIVE); y += 32;
     g_keyOsd = Make(0, L"BUTTON", T(L"屏幕底部显示按键提示（松开后渐隐）", L"Show pressed keys at bottom of screen (fades on release)"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 400, 24, ID_KEYOSD); y += 32;
     g_customCursor = Make(0, L"BUTTON", T(L"激活时使用十字准星光标", L"Use crosshair cursor while active"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 380, 24, ID_CUSTOMCURSOR); y += 32;
     g_modeHint = Make(0, L"BUTTON", T(L"屏幕右侧显示当前模式的按键提示框", L"Show current-mode key hints on the right side"), WS_VISIBLE | BS_AUTOCHECKBOX, x, y, 400, 24, ID_MODEHINT); y += 32;
@@ -162,6 +163,7 @@ void BuildGeneral() {
     Make(0, L"EDIT", dir.c_str(), WS_VISIBLE | ES_READONLY | ES_AUTOHSCROLL, x + 90, y - 2, 320, 22, 0);
 
     SendMessage(g_autoStart, BM_SETCHECK, IsAutoStartEnabled() ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessage(g_startActive, BM_SETCHECK, g_settings.startActive ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessage(g_keyOsd, BM_SETCHECK, g_settings.keyOsd ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessage(g_customCursor, BM_SETCHECK, g_settings.customCursor ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessage(g_modeHint, BM_SETCHECK, g_settings.modeHint ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -250,6 +252,7 @@ void ReadSpeedEdits() {
 
 void OnSave() {
     SetAutoStart(SendMessage(g_autoStart, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    g_settings.startActive = SendMessage(g_startActive, BM_GETCHECK, 0, 0) == BST_CHECKED;
     g_settings.keyOsd = SendMessage(g_keyOsd, BM_GETCHECK, 0, 0) == BST_CHECKED;
     bool cursorBefore = g_settings.customCursor;
     g_settings.customCursor = SendMessage(g_customCursor, BM_GETCHECK, 0, 0) == BST_CHECKED;

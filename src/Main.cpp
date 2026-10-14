@@ -201,6 +201,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
 
     LoadSettings();
     LoadKeymap();
+    g_isActive = g_settings.startActive;   // 必须在创建主窗口前定好（WM_CREATE 里按它设光标/标签/指示器）
 
     WNDCLASSEXW wc = { sizeof(wc) };
     wc.lpfnWndProc = MainWndProc;
