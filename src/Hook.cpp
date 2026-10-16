@@ -132,6 +132,7 @@ bool HandleGridKeyDown(DWORD vk, Modifiers m) {
     }
     if (IsAction(Action::DragToggle, (WORD)vk, m)) { ExitGridMode(); ToggleDrag(); UpdateIndicatorPosition(); return true; }
     if (IsModifierVk(vk)) return false;
+    if (ExitOnUnboundKey()) return false;   // 无对应指令：退出 Vimouse，按键放行
     ExitGridMode();   // 其他键：退出 grid，并吞掉
     return true;
 }
@@ -142,7 +143,9 @@ bool HandleHintKeyDown(DWORD vk, Modifiers m) {
         return true;
     }
     if (vk >= 'A' && vk <= 'Z' && !m.ctrl && !m.alt) { HintTypeLetter((char)vk); return true; }
-    return !IsModifierVk(vk);   // 其他键全部吞掉
+    if (IsModifierVk(vk)) return false;
+    if (ExitOnUnboundKey()) return false;   // 无对应指令：退出 Vimouse，按键放行
+    return true;   // 其他键全部吞掉
 }
 
 bool HandleWheelKeyDown(DWORD vk, Modifiers m) {
@@ -159,6 +162,7 @@ bool HandleWheelKeyDown(DWORD vk, Modifiers m) {
     if (IsAction(Action::ClickRight, (WORD)vk, m)) { Click(Button::Right); TriggerClickFlash(true); return true; }
     if (IsAction(Action::DragToggle, (WORD)vk, m)) { ToggleDrag(); return true; }
     if (vk == VK_BACK) { ExitWheelMode(); UpdateIndicatorPosition(); return true; }   // 回到鼠标模式
+    if (ExitOnUnboundKey()) return false;   // 无对应指令：直接退出 Vimouse，按键放行
     // 其他键退出滚轮模式并放行给系统
     ExitWheelMode();
     UpdateIndicatorPosition();
@@ -235,7 +239,7 @@ static void SwitchScreenToward(unsigned bit) {
 }
 
 bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
-    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return false;
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) { ExitOnUnboundKey(); return false; }   // 小键盘数字：放行（设置开启时同时退出）
 
     SetRemoteKeyLabel(vk);
 
@@ -318,13 +322,20 @@ bool HandleNormalKeyDown(DWORD vk, Modifiers m) {
         g_lastActionWasC = false; return true;
     }
 
-    // 功能键 / 方向键 / 修饰键 / 数字：放行
+    // 数字 / 空格：放行（设置开启时同时退出 Vimouse，它们也是打字用的键）
+    if ((vk >= '0' && vk <= '9') || vk == VK_SPACE) {
+        ExitOnUnboundKey();
+        return false;
+    }
+    // 功能键 / 方向键 / 修饰键 / 导航键：放行，保持激活
     if (IsModifierVk(vk) || (vk >= VK_F1 && vk <= VK_F24) || (vk >= VK_LEFT && vk <= VK_DOWN) ||
-        (vk >= '0' && vk <= '9') || vk == VK_TAB || vk == VK_SPACE || vk == VK_DELETE ||
+        vk == VK_TAB || vk == VK_DELETE ||
         vk == VK_HOME || vk == VK_END || vk == VK_PRIOR || vk == VK_NEXT || vk == VK_SNAPSHOT || vk == VK_INSERT)
         return false;
 
-    // 激活状态下其余未绑定按键（字母、标点等）：吞掉，避免误输入
+    // 激活状态下其余未绑定按键（字母、标点等）：设置开启时退出 Vimouse 并放行（多半是忘了关就开始打字）；
+    // 否则吞掉，避免误输入
+    if (ExitOnUnboundKey()) return false;
     g_lastActionWasC = false;
     UpdateIndicatorPosition();
     return true;
@@ -501,6 +512,16 @@ void ToggleActive(bool centerCursor) {
     const bool zh = IsSystemChinese();
     KeyOsd_ShowStatus(g_isActive ? (zh ? L"Vimouse 已开启" : L"Vimouse ON") : (zh ? L"Vimouse 已关闭" : L"Vimouse OFF"));
     KeyOsd_CursorPulse(g_isActive);
+}
+
+bool ExitOnUnboundKey() {
+    if (!g_settings.exitOnUnboundKey || !g_isActive) return false;
+    SetActive(false);
+    // 跟手动关闭一样的反馈：底部状态 + 光标处灰色脉冲
+    const bool zh = IsSystemChinese();
+    KeyOsd_ShowStatus(zh ? L"Vimouse 已关闭（按了无对应指令的键）" : L"Vimouse OFF (unbound key)");
+    KeyOsd_CursorPulse(false);
+    return true;
 }
 
 void ToggleRemote() {

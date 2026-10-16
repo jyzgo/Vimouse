@@ -7,6 +7,7 @@
 #include "Indicator.h"
 #include "Hint.h"
 #include "Util.h"
+#include "Hook.h"
 #include <objbase.h>
 #include <uiautomation.h>
 #include <dwmapi.h>
@@ -927,5 +928,6 @@ bool HandleClickKeyDown(DWORD vk, Modifiers m) {
         TypeLetter((char)vk);
         return true;
     }
+    if (ExitOnUnboundKey()) return false;   // 无对应指令：退出 Vimouse，按键放行
     return true;   // 其他键吞掉，避免误输入
 }

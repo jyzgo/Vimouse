@@ -32,6 +32,7 @@ struct Settings {
     bool modeHint     = true;   // 屏幕右侧显示当前模式可用按键
     bool inputMove    = false;  // hjkl 移动走 SendInput（Deskflow 等 KVM 主控端能看到，推到屏幕边缘可切屏）
     bool startActive  = true;   // 程序启动后直接激活；关掉则启动后待机，按快捷键/双击托盘再激活
+    bool exitOnUnboundKey = true;  // 激活时按到没有对应指令的键（字母/标点等）→ 自动退出 Vimouse 并放脉冲（防止忘了关就打字）
     int  language     = 0;      // 界面语言：0 跟随系统 / 1 中文 / 2 English（ini: language=auto|zh|en）
 
     // ---- 速度（设置里的「速度」页；范围与 ini 键名见 Config.cpp 的 kSpeedParams）----
